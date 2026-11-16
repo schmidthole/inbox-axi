@@ -75,6 +75,13 @@ with tempfile.TemporaryDirectory(dir=str(scratch)) as temp:
     recipe = cli(["setup", "pi"])
     assert str(destination) in recipe["launch"]
     assert Path(recipe["launch"].split(" -e ")[1]).is_file()
+    claude = cli(["setup", "claude"])
+    assert claude["automatic_push_enabled"] is True
+    assert claude["routing"] == "active_conversation"
+    assert "--dangerously-load-development-channels server:inbox" in claude["launch"]
+    assert "--session-id" not in claude["launch"]
+    assert "INBOX_AXI_SESSION" not in claude["mcp_config"]["mcpServers"]["inbox"]["env"]
+    assert Path(claude["mcp_config"]["mcpServers"]["inbox"]["args"][0]).is_file()
     cli(["ack", first["id"]])
     assert cli(["status"])["pending"] == 0
     result = subprocess.run(

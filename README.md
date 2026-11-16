@@ -6,10 +6,10 @@ not a connector, task manager, scheduler, or agent runtime.
 
 **v0.1:** Python ≥3.9, Unix/macOS, local SQLite. Default runtime has no dependencies.
 Native adapters are opt-in. Their protocol fixtures pass, but authenticated native
-idle-wake/busy-steering/UI behavior is **not live-verified**. **Claude automatic
-push is disabled:** native session switching cannot be atomically fenced. Its
-normal adapter is tools-only MCP (explicit ack/reply plus manual CLI reads), not
-full native push support. This is an outstanding v1 acceptance blocker.
+idle-wake/busy-steering/UI behavior is **not live-verified**. Claude's native channel
+routes pending topics to the active conversation in its launch, including after
+`/clear` or `/resume`. Restore thread history and associated generic task context
+before acting or replying in replacement context.
 
 ## Quickstart
 
@@ -73,11 +73,12 @@ harness config is rewritten. Inspect and run the returned recipe yourself.
   bounded steering slot. Missing progress fails visibly after five minutes rather
   than stalling silently. No prompt expansion or automatic output forwarding.
 - **Claude:** bundled Node ≥24 MCP SDK channel, launched by Claude over stdio.
-  Install its optional Node dependencies using the printed `npm ci` recipe.
-  **Tools-only by default:** explicit ack/reply, manual CLI read-thread. Automatic
-  channel push remains disabled because `/clear` can route queued events into a
-  replacement session. An experimental channel factory is exercised only by
-  offline fixtures; no setup flag enables it. No HTTP listener or permission relay.
+  Normal entry polls automatically and exposes explicit ack/reply tools. Install
+  its optional Node dependencies using the printed `npm ci` recipe. Setup includes
+  the native development-channel flag; interactive consent, supported auth and
+  org policy still apply. Routing follows the active conversation; generated
+  thread/message IDs persist across conversation changes. No HTTP listener or
+  permission relay; notification writes never auto-ack.
 - **Codex:** `pip install '.[codex]'`, then bind an exact native thread UUID,
   shared private socket, Codex home and server version. Uses supported WebSocket
   library over the native Unix control socket. Idle `thread/queue/add`, busy

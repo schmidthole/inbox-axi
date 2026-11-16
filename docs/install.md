@@ -36,30 +36,36 @@ native delivery certification.
 
 ## Claude Code
 
-`setup claude [--session UUID]` generates a fresh explicit session UUID if omitted,
-inline session-scoped `--mcp-config` and `--session-id`. The normal entry provides
-ack/reply tools only; use `inbox-axi read-thread` manually to read requests. It does
-not declare a channel capability, spawn a polling consumer or enable a native
-channel flag. No files in `~/.claude*` or `.mcp.json` are written. Use a fresh
-session ID or deliberately choose an explicit existing UUID with the appropriate
-native resume command, never most-recent.
+`setup claude` prints an inline session-scoped `--mcp-config` and the native
+`--dangerously-load-development-channels server:inbox` flag. The normal entry
+advertises `claude/channel`, polls pending input automatically after initialization,
+and provides explicit ack/reply tools. It writes no files in `~/.claude*` or
+`.mcp.json` and does not disable unrelated configuration or permissions. There is
+no additional inbox enablement flag, immutable session UUID binding or auto-resume.
+Use ordinary native conversation/resume controls; the channel routes to the
+active conversation of that launch, including after `/clear` or `/resume`.
 
-**Automatic push is disabled, with an actionable stderr capability warning.**
-Native channel notifications carry no target-session precondition/receipt. Native
-`/clear` hooks run in background and cannot atomically prevent already queued
-notifications reaching replacement context. The metadata retains the original
-intended binding, but metadata is not native delivery enforcement. No runtime or
-setup flag enables the experimental channel factory; fixtures invoke it directly
-for protocol tests only. Full Claude deterministic delivery remains blocked.
+Generated thread/message IDs remain authoritative across these changes. Each
+notification tells the receiving conversation to restore thread history and
+associated generic task context with explicit `read-thread` CLI argv before
+acting/replying. `launch_id` is a process diagnostic only, never the current
+conversation UUID. The coordinator owns any topic/task association; inbox-axi
+has no task database/lifecycle integration.
 
-Even if that session-fencing blocker is resolved, custom preview channels are not
-publicly allowlisted. An enabled deployment would require local development/MCP
-consent, supported Anthropic auth and organization channel policy. Preview flags
-do not appear in help and are ignored for `-p`/Agent SDK. Claude.ai/Console auth is
-supported upstream, not Bedrock/Vertex/Foundry; Team/Enterprise and managed Console
-organizations need channels enabled by policy. MCP connection alone does not prove
-channel admission. SDK1.32.1 uses protocol ≤2025-11-25, avoiding the documented v2
-registration issue at protocol2026-07-28. Notification write is never a receipt.
+Native channels are a research preview. Custom channels are not on the public
+allowlist, so the documented development-channel flag requires local interactive
+confirmation. It bypasses only the native allowlist, **not** org policy or tool
+permissions. Accept applicable MCP consent too. Preview flags do not appear in
+help and the development flag is ignored for `-p`/Agent SDK. Supported upstream
+auth is claude.ai or Console API key, not Bedrock/Vertex/Foundry; Team/Enterprise
+and managed Console organizations need channels enabled by policy.
+
+Check the native startup channel notice and `/mcp`; connected tools alone do not
+prove admission. SDK1.32.1 uses protocol ≤2025-11-25, avoiding the documented v2
+registration issue at protocol2026-07-28. The adapter cannot confirm native
+registration or receipt from a write: diagnostics explicitly say unconfirmed,
+and mail remains pending until explicit incorporation ack. Live native admission,
+UI behavior and model processing have not been tested.
 
 ## Codex
 
@@ -91,4 +97,7 @@ mailbox lock activity, and session-scoped configuration uncertainty separately.
 A lock can belong to any harness; it is not proof of a specific native session.
 `capability_verified` stays false: version/help, installed files and fixtures do not
 prove native UI idle wake/busy steering, channel admission, approvals or model
-incorporation. No doctor command invokes a model or changes harness configuration.
+incorporation. For Claude, `mechanism_supported` and `automatic_push_enabled`
+describe the bundled adapter default, not a running/admitted native instance;
+`configuration_scope` identifies that distinction. `channel_registration` and
+`harness_active` stay unknown. No doctor command invokes a model or changes harness configuration.

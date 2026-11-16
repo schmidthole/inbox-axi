@@ -5,11 +5,10 @@ import shlex
 import shutil
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
 from ..delivery import active
-from ..store import InboxError, Store, canonical, default_root
+from ..store import Store, canonical, default_root
 
 
 ASSETS = Path(__file__).parent
@@ -27,8 +26,6 @@ def management(args):
     )
     environment = {"INBOX_AXI_HOME": str(root), "INBOX_AXI_PYTHON": sys.executable}
     if args.command == "setup":
-        if args.session and args.harness != "claude":
-            raise InboxError("session selector is only supported for claude setup")
         result = {
             "harness": args.harness,
             "writes_config": False,
@@ -48,13 +45,6 @@ def management(args):
                 "interactive native pi with its user-message api; one mailbox per workspace; not live-verified"
             )
         elif args.harness == "claude":
-            session = args.session or str(uuid.uuid4())
-            try:
-                if str(uuid.UUID(session)) != session:
-                    raise ValueError()
-            except ValueError as exc:
-                raise InboxError("session must be an exact lowercase uuid") from exc
-            environment["INBOX_AXI_SESSION"] = session
             config = {
                 "mcpServers": {
                     "inbox": {
@@ -71,16 +61,18 @@ def management(args):
             result["launch"] = shlex.join(
                 [
                     "claude",
-                    "--session-id",
-                    session,
                     "--mcp-config",
                     canonical(config),
+                    "--dangerously-load-development-channels",
+                    "server:inbox",
                 ]
             )
-            result["native_session_fencing"] = "unsupported"
-            result["automatic_push_enabled"] = False
+            result["routing"] = "active_conversation"
+            result["mechanism"] = "native_mcp_channel"
+            result["automatic_push_enabled"] = True
+            result["channel_registration"] = "unknown"
             result["requirements"] = (
-                "node >=24 and mcp consent; tools-only, automatic push disabled because native session switching cannot be atomically fenced; use manual inbox-axi read-thread/ack/reply"
+                "node >=24; interactive development-channel and mcp consent, supported anthropic auth and organization channel policy; verify native registration; active conversation must restore thread history and associated generic task context before processing"
             )
         else:
             result["launch_template"] = (
@@ -122,11 +114,19 @@ def management(args):
             ASSETS / "node_modules/@modelcontextprotocol/sdk/package.json"
         ).is_file() and shutil.which("node") is not None
     return {
-        "native_session_fencing": (
-            "unsupported" if args.harness == "claude" else "not_live_verified"
+        **(
+            {
+                "routing": "active_conversation",
+                "mechanism": "native_mcp_channel",
+                "mechanism_supported": True,
+                "configuration_scope": "bundled_adapter_default",
+                "channel_registration": "unknown",
+            }
+            if args.harness == "claude"
+            else {"native_session_fencing": "not_live_verified"}
         ),
         "automatic_push_enabled": (
-            False if args.harness == "claude" else "session_scoped_opt_in"
+            True if args.harness == "claude" else "session_scoped_opt_in"
         ),
         "harness": args.harness,
         "installed": executable is not None,

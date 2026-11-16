@@ -57,3 +57,16 @@ Replies do not ack. There is no auto-forwarding of assistant output.
 explicit inbound message IDs. It never acknowledges input or returns body content.
 The Pi adapter uses this bounded read to distinguish trusted explicit incorporation
 from mere transport writes or native observations.
+
+## Claude channel routing
+
+The normal native channel targets the active conversation attached to its launch,
+including conversation replacement. Notification metadata contains generated
+message/thread IDs, server sequence, `routing: active_conversation` and a diagnostic
+process `launch_id`, never a claimed current Claude session UUID. Body text/data
+cannot overwrite these fields. Each notification includes an explicit thread-read
+CLI argv reminder. Restore thread history and any generic associated task context
+before processing, replying or acknowledging in a new/current conversation.
+Optional thread metadata can carry an operator-owned task reference, but inbox-axi
+never interprets it as a task lifecycle or performs automatic mapping. Native
+notification writes are not receipts, registration confirmation or incorporation.

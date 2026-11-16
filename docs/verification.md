@@ -9,7 +9,8 @@ missing-progress deadline/shutdown recovery, repeated Pi steering during one
 continuing busy run, and Codex local
 WebSocket RPC identity/queue/steer/rejection/timeout/uncertainty/approval fixtures,
 Pi lifecycle/user-message API fixture, and official MCP SDK stdio Claude tools/
-notification fixture plus normal-entry automatic-push-disabled checks. CI is
+normal direct-entry channel notifications, explicit ack/reply, periodic polling,
+consumer exclusion, shutdown/restart and simulated active-conversation replacement. CI is
 configured for Python 3.9 and 3.13 with Node24; optional dependencies are installed
 locally, then Black/Prettier checks, compile/lowercase checks, tests
 and wheel contents/install checks. The dev extra supplies the setuptools/wheel
@@ -25,23 +26,29 @@ are **not** proof of native idle/busy delivery, session switching, policy admiss
 or visible UI behavior. Mock APIs are labeled fixtures, not installed capability
 verification. No authenticated/model session was exercised.
 
-## Outstanding acceptance blocker
+## Claude active-conversation routing
 
-Claude atomic native-session fencing is unsupported by the documented channel
-contract. Automatic push is disabled in its normal entry/setup, while manual
-mailbox CLI and explicit MCP ack/reply remain available. Experimental channel
-transport fixtures do not satisfy the original three-harness automatic-delivery
-criterion. Official hooks reference SessionStart documentation states startup and
-`/clear` hooks run in background, so a hook-updated check cannot atomically fence
-check→notification→native switch. No hooks were added or synchronization invented.
-Resolve this product/capability gap before accepting full three-harness coverage.
+The inbox attaches to the native channel/launch rather than an immutable current
+conversation. After `/clear` or `/resume`, pending topics may reach replacement
+context; restore explicit thread history and associated generic task context before
+processing. Stable message/thread IDs—not a harness-session assertion—control
+reply/ack routing. `launch_id` identifies only the MCP process. This is the
+operator-approved contract; immutable-conversation fencing is not required.
+
+The direct-entry SDK fixture changes only its receiver's conversation label; it
+does not claim to observe a real native lifecycle event. It proves metadata and
+thread-history/reply routing remain valid for replacement context, while native
+interactive switch/admission/model behavior remains untested. Development/MCP
+consent, supported auth and organization policy remain real deployment gates.
+The channel emits no notification receipt or registration acknowledgment, so
+doctor and startup diagnostics keep those states unknown/unconfirmed.
 
 ## Manual native checklist (not run, not passed)
 
 For each supported installed harness, with operator authorization:
 
 1. Launch its documented adapter recipe in a disposable private workspace/store,
-   exact durable native session, and ordinary permission mode. Confirm original
+   intended native launch/thread, and ordinary permission mode. Confirm original
    native UI/messages and unrelated config are unchanged.
 2. While idle post text+data; confirm an actual native user/channel event starts a
    turn. Note the stable mailbox ID. Do not infer from consumer/API write success.
@@ -55,10 +62,13 @@ For each supported installed harness, with operator authorization:
 5. Exercise a native approval wait; confirm the adapter cannot approve it, UI
    remains usable, and no sandbox/provider policy is relaxed.
 6. Crash/restart adapter and switch/reload native sessions. Confirm exclusion,
-   release, stable-ID redelivery and stale-session isolation. For Codex test a
+   release, stable-ID redelivery, Pi generation isolation and Claude active-
+   conversation context restoration. For Codex test a
    turn-race rejection and uncertain submission recovery without blind fallback.
-7. Claude: first resolve the atomic session-fencing blocker; then test development/
-   MCP consent and actual channel registration under the account/org policy. A blocked channel is a deployment blocker, not a pass.
+7. Claude: test development/MCP consent and actual channel registration under the
+   account/org policy, then `/clear`/`/resume` with pending topics. Restore thread
+   and generic task context before acting/ack/reply. A policy-blocked channel is
+   a deployment blocker, not a passing native check.
 
 Required live guarantees remain unavailable until these checks are authorized and
 performed. Docs promise only documented native mechanisms under healthy/admitted
@@ -72,8 +82,6 @@ bindings, not unconditional wake, semantic handling, responses or exactly-once.
 - https://code.claude.com/docs/en/channels.md
 - Official fakechat README/server (reference only; no connector/UI code copied):
   https://github.com/anthropics/claude-plugins-official/tree/main/external_plugins/fakechat
-- Claude hook ordering reviewed at https://code.claude.com/docs/en/hooks.md#sessionstart
-  (relevant ordering sections; no hook implementation added).
 - MCP SDK v1.x README, docs/server.md, docs/protocol.md and installed SDK stdio
   transport contracts: https://github.com/modelcontextprotocol/typescript-sdk/tree/v1.x
 - Codex rust-v0.167.0 `codex-rs/app-server/README.md`, app-server-client/README.md,

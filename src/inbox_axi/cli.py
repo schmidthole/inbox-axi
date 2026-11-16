@@ -145,9 +145,6 @@ def parser():
         "setup", help="print session-scoped adapter launch instructions"
     )
     command.add_argument("harness", choices=("pi", "codex", "claude"))
-    command.add_argument(
-        "--session", help="explicit claude session uuid (generated if omitted)"
-    )
     commands.add_parser(
         "uninstall", help="explain reversible session-only removal; retain mailbox"
     )

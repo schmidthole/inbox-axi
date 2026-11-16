@@ -1,7 +1,7 @@
 # Delivery and recovery
 
 One private mailbox root represents one inbox/workspace. Exactly one active
-consumer (Pi, Codex, experimental Claude fixture or manual consume) holds a
+consumer (Pi, Codex, Claude or manual consume) holds a
 nonblocking exclusive OS `flock` on `consumer.lock`. A competing consumer errors; its writes/pending/read
 commands remain usable. Shutdown closes the descriptor; the OS releases it after
 crash. Lockfiles remain on disk; their existence does not mean active ownership.
@@ -69,25 +69,32 @@ Shutdown clears the progress timer, increments the generation fence, kills its
 child and discards deferred input, preventing stale callbacks from targeting a
 replacement runtime. Ephemeral/noninteractive modes fail.
 
-Claude automatic push is **disabled in the normal entry**. The native MCP channel
-protocol lacks an atomic target-session precondition. `/clear` SessionStart hooks
-run in the background; checking a hook-updated fence before writing cannot stop a
-queued event crossing into a replacement session. `/resume` hook ordering alone
-cannot fence all transitions. There is no invented hook synchronization protocol
-or silent automatic retargeting. Setup launches tools-only MCP; manually read via
-CLI and explicitly call ack/reply. Doctor reports `native_session_fencing:
-unsupported`, `automatic_push_enabled: false`. This is a delivery capability
-blocker, not merely a missing live test.
+Claude's normal entry declares the native MCP channel capability and starts the
+same deterministic consumer after MCP initialization. It sends bounded native
+notifications in order for the active conversation; busy events may batch on its
+next native turn, without interrupting an executing tool. The mailbox attaches
+to the channel launch, **not** an immutable Claude conversation UUID. After
+`/clear` or `/resume`, the new/current conversation may receive the same pending
+topics. This is the intended routing contract, not a failed session fence.
 
-The bundled experimental channel factory is tested directly in an offline
-fixture, never enabled by normal setup/entry. Its notifications retain original
-binding/message/thread metadata and never auto-ack. Channel events queue in order
-for the next native turn, potentially batched while busy; executing tools are not
-interrupted. There is **no native inbound receipt**. Consent/policy failures can
-silently drop notifications. A future enabled deployment must resolve atomic
-session fencing or receive explicit operator acceptance of that product risk;
-transport fixtures cannot establish it. Tools retain ordinary native approvals;
-no remote approval capability is declared.
+Every event preserves generated `thread_id`, `message_id`, `seq` and routing
+metadata. `launch_id` identifies only the MCP process and is stable while that
+process survives conversation changes; it is not a current-session assertion.
+Before acting or replying, restore the relevant thread history (using the explicit
+read-thread CLI argv carried in the event), page until `next_cursor` is null, and
+restore any generic associated task context from operator metadata. A coordinator
+may associate a topic with a task, but inbox-axi neither imports a task database
+nor automatically maps identifiers to a lifecycle. Replies require exact thread
+and parent IDs, never most-recent conversation/topic selection.
+
+There is **no native notification receipt or channel-registration acknowledgment**.
+A successful write proves transport output only; missing development/MCP consent,
+auth or organization policy can cause silent native drops. Startup diagnostics
+report local consumer readiness with registration/receipt unconfirmed. Check the
+native channel notice, `/mcp` and policy/auth diagnostics. Pending input remains
+until explicit incorporation ack, and retries/restart can redeliver stable IDs.
+Replacement context must restore state before acknowledging; reply does not ack.
+Native tool approvals remain in force and no permission relay is declared.
 
 Codex binds an exact UUID plus socket/home/version; the native TUI must already
 have loaded that same thread on that same shared server. Metadata and a one-turn

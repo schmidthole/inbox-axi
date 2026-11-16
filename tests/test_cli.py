@@ -185,13 +185,19 @@ class CliTests(unittest.TestCase):
             self.assertFalse(recipe["writes_config"])
             self.assertFalse(recipe["capability_verified"])
             if harness == "claude":
-                self.assertFalse(recipe["automatic_push_enabled"])
-                self.assertEqual(recipe["native_session_fencing"], "unsupported")
-                self.assertNotIn(
-                    "dangerously-load-development-channels", recipe["launch"]
+                self.assertTrue(recipe["automatic_push_enabled"])
+                self.assertEqual(recipe["routing"], "active_conversation")
+                self.assertEqual(recipe["channel_registration"], "unknown")
+                self.assertIn(
+                    "--dangerously-load-development-channels server:inbox",
+                    recipe["launch"],
                 )
-        self.run_cli("setup", "claude", "--session", "latest", success=False)
-        self.run_cli("setup", "pi", "--session", "ignored", success=False)
+                self.assertNotIn("--session-id", recipe["launch"])
+                self.assertNotIn(
+                    "INBOX_AXI_SESSION",
+                    recipe["mcp_config"]["mcpServers"]["inbox"]["env"],
+                )
+                self.assertNotIn("native_session_fencing", recipe)
         self.run_cli("uninstall")
         self.assertEqual(config.read_text(), '{"unrelated":true}')
         self.assertFalse(Path(self.root).exists())
@@ -237,3 +243,14 @@ class CliTests(unittest.TestCase):
         self.assertEqual(self.run_cli("pending")["messages"], [second])
         self.run_cli("ack-status", *(ids * 5), success=False)
         self.run_cli("ack-status", "latest", success=False)
+
+    def test_claude_doctor_separates_mechanism_from_native_registration(self):
+        status = self.run_cli("doctor", "claude")
+        self.assertTrue(status["automatic_push_enabled"])
+        self.assertTrue(status["mechanism_supported"])
+        self.assertEqual(status["routing"], "active_conversation")
+        self.assertEqual(status["channel_registration"], "unknown")
+        self.assertEqual(status["harness_active"], "unknown")
+        self.assertFalse(status["capability_verified"])
+        self.assertNotIn("native_session_fencing", status)
+        self.assertFalse(Path(self.root).exists())
