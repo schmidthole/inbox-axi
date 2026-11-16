@@ -6,7 +6,7 @@ is supported; Node ≥24 is required for bundled Node/Pi fixture execution. Use
 adds websockets ≥15,<16 (15 supports Python 3.9). Development additionally uses
 Black 25.11.0 and Prettier 3.6.2. The Python dev extra also installs
 `setuptools>=61` and `wheel` so `make test-install` can build without build isolation
-in a fresh virtualenv; CI and the README use the same `.[codex,dev]` setup.
+in a fresh virtualenv; the README documents the `.[codex,dev]` setup.
 Claude's SDK 1.32.1 is isolated in the adapter asset directory with a lockfile. `setup claude` prints the exact local `npm ci
 --omit=dev --ignore-scripts --prefix ...` command for an installed package.
 No dependency installer is executed by the CLI itself.

@@ -10,10 +10,10 @@ continuing busy run, and Codex local
 WebSocket RPC identity/queue/steer/rejection/timeout/uncertainty/approval fixtures,
 Pi lifecycle/user-message API fixture, and official MCP SDK stdio Claude tools/
 normal direct-entry channel notifications, explicit ack/reply, periodic polling,
-consumer exclusion, shutdown/restart and simulated active-conversation replacement. CI is
-configured for Python 3.9 and 3.13 with Node24; optional dependencies are installed
-locally, then Black/Prettier checks, compile/lowercase checks, tests
-and wheel contents/install checks. The dev extra supplies the setuptools/wheel
+consumer exclusion, shutdown/restart and simulated active-conversation replacement.
+After installing the optional dependencies locally, `make check` runs
+Black/Prettier checks, compile/lowercase checks, tests and wheel contents/install
+checks. No hosted CI workflow is configured. The dev extra supplies the setuptools/wheel
 prerequisites for the non-build-isolated wheel check; no supplemental tool install
 is needed after the documented fresh `pip install '.[codex,dev]'`. No test spends
 inference or touches real user threads. Native availability is an offline prerequisite, not a passing live check.
