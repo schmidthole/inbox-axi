@@ -98,11 +98,14 @@ npm ci --ignore-scripts --prefix src/inbox_axi/adapters
 make format
 make test
 make lint
+make test-install
 ```
 
 Tests use temporary private stores, mock native APIs and local WebSocket/stdio
 fixtures only: no model calls or existing native session mutations.
-`make test` requires the opt-in adapter test dependencies and Node ≥24.
+`make test` requires the opt-in adapter test dependencies and Node ≥24. The dev
+extra includes `setuptools>=61` and `wheel`, required by the isolated wheel check
+that intentionally builds without build isolation. CI uses this same dev setup.
 
 **License:** the owner has not specified a license. No license or copyright
 ownership is invented here. Resolve licensing before distribution. Implementation

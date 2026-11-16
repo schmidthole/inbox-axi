@@ -2,14 +2,18 @@
 
 Automated suite: SQLite invariants, transaction retries, concurrent processes,
 CLI/stdin/JSON roundtrips, bounded input/pages, permissions/symlinks, consumer
-exclusion/backoff, crash/EOF release, stable-ID redelivery/no auto-ack, Codex local
+exclusion/backoff, fair new-input admission beyond eight unacked messages, due
+retries under continuing new input, crash/EOF release, stable-ID redelivery/no
+auto-ack, repeated Pi steering during one continuing busy run, and Codex local
 WebSocket RPC identity/queue/steer/rejection/timeout/uncertainty/approval fixtures,
 Pi lifecycle/user-message API fixture, and official MCP SDK stdio Claude tools/
 notification fixture plus normal-entry automatic-push-disabled checks. CI is
 configured for Python 3.9 and 3.13 with Node24; optional dependencies are installed
 locally, then Black/Prettier checks, compile/lowercase checks, tests
-and wheel contents/install checks. No test spends inference or touches real user
-threads. Native availability is an offline prerequisite, not a passing live check.
+and wheel contents/install checks. The dev extra supplies the setuptools/wheel
+prerequisites for the non-build-isolated wheel check; no supplemental tool install
+is needed after the documented fresh `pip install '.[codex,dev]'`. No test spends
+inference or touches real user threads. Native availability is an offline prerequisite, not a passing live check.
 
 Observed during implementation: Pi1.5.2, Codex CLI0.167.0, running shared daemon
 0.169.0, Claude Code2.1.325. Read-only WebSocket-over-Unix initialize against the

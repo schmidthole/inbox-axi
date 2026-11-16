@@ -17,6 +17,6 @@ jobs:
         with:
           node-version: '24'
       - run: python -m venv .venv
-      - run: .venv/bin/python -m pip install '.[codex,dev]' wheel 'setuptools>=61'
+      - run: .venv/bin/python -m pip install '.[codex,dev]'
       - run: npm ci --ignore-scripts --prefix src/inbox_axi/adapters
       - run: make check

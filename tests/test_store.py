@@ -158,7 +158,10 @@ class StoreTests(unittest.TestCase):
         consumer = Consumer(self.store)
         first = consumer.poll(now=0)
         self.assertEqual(len(first), 8)
-        self.assertEqual(consumer.poll(now=1), [])
+        following = consumer.poll(now=1)
+        self.assertEqual([item["seq"] for item in following], list(range(9, 17)))
+        self.assertEqual(len(consumer.poll(now=2)), 4)
+        self.assertEqual(consumer.poll(now=3), [])
         consumer.close()
         second = Consumer(self.store)
         self.addCleanup(second.close)
@@ -206,3 +209,44 @@ class StoreTests(unittest.TestCase):
         os.chmod(self.root / "consumer.lock", 0o644)
         with self.assertRaisesRegex(InboxError, "unsafe private file"):
             active(self.store)
+
+    def test_consumer_ninth_message_does_not_wait_for_ack(self):
+        messages = [self.store.post() for _ in range(9)]
+        consumer = Consumer(self.store)
+        self.addCleanup(consumer.close)
+        self.assertEqual(consumer.poll(now=0), messages[:8])
+        self.assertEqual(consumer.poll(now=1), messages[8:])
+        self.assertEqual(self.store.status()["pending"], 9)
+        self.store.ack(messages[0]["id"])
+        self.store.ack(messages[8]["id"])
+        self.assertEqual(consumer.poll(now=30), messages[1:8])
+
+    def test_consumer_fair_new_admission_and_retries_under_continuing_input(self):
+        initial = [self.store.post() for _ in range(8)]
+        consumer = Consumer(self.store)
+        self.addCleanup(consumer.close)
+        self.assertEqual(consumer.poll(now=0), initial)
+        admitted = []
+        retried = set()
+        for now in range(30, 40):
+            for _ in range(8):
+                self.store.post()
+            batch = consumer.poll(now=now)
+            self.assertLessEqual(len(batch), 8)
+            new = [item["seq"] for item in batch if item["seq"] > 8]
+            admitted.extend(new)
+            retried.update(item["seq"] for item in batch if item["seq"] <= 8)
+            self.assertGreaterEqual(len(new), 4)
+            if now == 31:
+                self.assertEqual(retried, set(range(1, 9)))
+        self.assertEqual(admitted, list(range(9, 9 + len(admitted))))
+        while True:
+            batch = consumer.poll(now=40)
+            if not batch:
+                break
+            self.assertLessEqual(len(batch), 8)
+            admitted.extend(item["seq"] for item in batch if item["seq"] > 8)
+        self.assertEqual(admitted, list(range(9, 89)))
+        for message in initial:
+            self.store.ack(message["id"])
+        self.assertTrue(all(item["seq"] > 8 for item in consumer.poll(now=1000)))

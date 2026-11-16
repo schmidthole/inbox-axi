@@ -14,7 +14,7 @@ const events = new Map();
 const messages = [];
 const errors = [];
 const statuses = [];
-let idle = true;
+let idle = false;
 const pi = {
   on(name, callback) {
     events.set(name, callback);
@@ -75,16 +75,68 @@ try {
   assert.equal(cli(["pending"]).messages[0].id, first.id);
   assert.ok(cli(["status"]).consumer_active);
   assert.ok(statuses.some((value) => value.includes("active")));
+  const second = cli(
+    ["post", "--body-file", "-"],
+    "second steering input during the same busy run",
+  );
   cli(["ack", first.id]);
-  cli(["post", "--body-file", "-"], "must wait for safe settlement");
   await new Promise((resolve) => setTimeout(resolve, 1200));
   assert.equal(messages.length, 1);
-  events.get("agent_settled")();
+  const observe = (text, role = "user", context = ctx) =>
+    events.get("message_start")(
+      { message: { role, content: [{ type: "text", text }] } },
+      context,
+    );
+  observe("unrelated user input mentioning " + first.id);
+  observe(messages[0].text, "assistant");
+  observe(messages[0].text, "user", {
+    ...ctx,
+    sessionManager: {
+      ...ctx.sessionManager,
+      getSessionId: () => "other-session",
+    },
+  });
+  assert.equal(messages.length, 1);
+  observe(messages[0].text);
+  await until(() => messages.length === 2);
+  assert.equal(idle, false);
+  assert.ok(messages[1].text.includes(second.id));
+  assert.deepEqual(messages[1].options, {
+    deliverAs: "steer",
+    expandPromptTemplates: false,
+  });
+  assert.equal(cli(["pending"]).messages[0].id, second.id);
+  const third = cli(
+    ["post", "--body-file", "-"],
+    "third steering input without settlement",
+  );
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  observe(messages[0].text);
+  assert.equal(messages.length, 2);
+  cli(["ack", second.id]);
+  observe(messages[1].text);
+  await until(() => messages.length === 3);
+  assert.ok(messages[2].text.includes(third.id));
+  assert.equal(idle, false);
+  assert.equal(cli(["pending"]).messages[0].id, third.id);
+  const oldOffer = messages[2].text;
   await events.get("session_shutdown")();
   assert.equal(cli(["status"]).consumer_active, false);
   events.get("session_start")({}, ctx);
-  await until(() => messages.length === 2);
+  await until(() => messages.length === 4);
+  assert.ok(messages[3].text.includes(third.id));
+  assert.notEqual(messages[3].text, oldOffer);
+  const fourth = cli(["post", "--body-file", "-"], "new generation request");
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  observe(oldOffer);
+  assert.equal(messages.length, 4);
+  cli(["ack", third.id]);
+  observe(messages[3].text);
+  await until(() => messages.length === 5);
+  assert.ok(messages[4].text.includes(fourth.id));
   await events.get("session_shutdown")();
+  observe(messages[4].text);
+  assert.equal(messages.length, 5);
   assert.equal(cli(["pending"]).messages.length, 1);
   assert.deepEqual(errors, []);
   console.log("pi fixture passed; not a live native session");

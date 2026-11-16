@@ -9,13 +9,22 @@ Pi/Claude child consumers also watch a dedicated stdin pipe: parent death/EOF
 stops them within one polling interval, even with no pending messages.
 
 The deterministic consumer checks once per second, independent of model turns.
-At most eight oldest pending messages form the in-flight window. Per-message
-redelivery waits 30, 60, 120, 240, then at most 300 seconds. Explicit incorporation
-ack removes an item from the window; subsequent input advances. **An unacked
-oldest window intentionally blocks later messages** rather than allowing an
-unbounded native queue. Inspect `pending --after ...` to see later input. Restart
-may immediately redeliver the same stable IDs; deduplicate IDs in working context.
-There is no exactly-once claim and no real-time scheduling guarantee.
+Each offer contains at most eight messages. New pending input is admitted in FIFO
+server order independently of older unacknowledged input. When both classes have
+work, each poll reserves four slots for new input and four for due retries; either
+class can use the other's unused slots. Retries are selected by earliest due time,
+then server sequence, so continuing new traffic cannot starve them. The emitted
+batch is ordered by server sequence. Old unacknowledged input no longer blocks
+message nine or subsequent operator steering.
+
+Per-message redelivery waits 30, 60, 120, 240, then at most 300 seconds. Scheduling
+metadata lives in a connection-private, file-backed SQLite temporary table, with
+one small record per offered pending message, not a growing in-memory batch or
+native queue. Acked records are excluded and removed on the next poll. Only bounded
+query pages/batches are loaded into Python memory. The table disappears on consumer
+shutdown/crash; restart can immediately redeliver stable message IDs in FIFO order.
+Deduplicate IDs in working context. There is no exactly-once claim, fixed delivery
+latency under unlimited incoming traffic, or real-time scheduling guarantee.
 
 Pipe/API write success, observed native receipt, incorporation ack, reply, and
 completion are distinct facts. This version retains mailbox pending state until
@@ -26,14 +35,23 @@ after persisting enough working context to survive your own session reset.
 ## Native boundaries
 
 Pi's native user-message API wakes idle sessions; busy `steer` delivery waits for
-the current assistant turn's tool calls before another model request. While busy,
-at most one inbox batch is queued between `agent_settled` events. If a native input
-hook handles the message without starting a run, idle polling can retry it rather
-than waiting forever for a nonexistent settled event. Suppressed repeats remain
-pending and retry later. Shutdown increments a generation fence before killing
-its child, so stale callbacks cannot target a replacement runtime. Binding data
-contains the exact durable session ID/file; ephemeral/noninteractive modes fail.
-Native input handlers may transform/handle messages; no false receipt is asserted.
+the current assistant turn's tool calls before another model request. There is one
+outstanding native batch and at most one deferred batch. Input reads pause behind
+that bounded slot. A matching native `message_start` user event releases the slot
+as soon as the batch is observed consumed, even while the same agent run remains
+busy. Matching requires the exact injected text, including stable envelope IDs and
+a fresh per-offer delivery UUID, plus the current durable session ID/file and
+runtime generation. Unrelated messages and stale observations cannot release it.
+The next deferred batch can then steer before the run finally settles.
+
+Native observation is not incorporation: no automatic ack occurs. Pending input
+still retries with consumer backoff. A genuinely idle session with no native
+pending messages can also reopen the slot, including when an input hook handled a
+message without starting a run. Input hooks that transform injected content can
+prevent exact observation matching; the adapter does not mistake unrelated text
+for receipt. Shutdown increments a generation fence before killing its child and
+discarding deferred input, so callbacks cannot target a replacement runtime.
+Ephemeral/noninteractive modes fail.
 
 Claude automatic push is **disabled in the normal entry**. The native MCP channel
 protocol lacks an atomic target-session precondition. `/clear` SessionStart hooks

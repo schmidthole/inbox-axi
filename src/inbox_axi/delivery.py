@@ -25,10 +25,26 @@ class Consumer:
             if isinstance(exc, BlockingIOError):
                 raise ConsumerBusy("an inbox consumer is already active") from exc
             raise
-        self.inflight = {}
+        try:
+            # retry state ends with this consumer; restart deliberately redelivers.
+            self.store.db.execute("pragma temp_store=file")
+            self.store.db.executescript(
+                """
+                drop table if exists temp.consumer_offers;
+                create temp table consumer_offers (
+                    message_id text primary key, due real not null, attempts integer not null
+                );
+                create index temp.consumer_offer_due on consumer_offers(due);
+            """
+            )
+        except BaseException:
+            os.close(self.fd)
+            self.fd = None
+            raise
 
     def close(self):
         if self.fd is not None:
+            self.store.db.execute("drop table if exists temp.consumer_offers")
             os.close(self.fd)
             self.fd = None
 
@@ -36,21 +52,48 @@ class Consumer:
         if self.fd is None:
             raise InboxError("consumer is closed")
         now = time.monotonic() if now is None else now
-        messages = self.store.page(pending=True, limit=8)["messages"]
-        current = {message["id"] for message in messages}
-        self.inflight = {
-            key: value for key, value in self.inflight.items() if key in current
-        }
-        ready = []
-        for message in messages:
-            due, attempts = self.inflight.get(message["id"], (0, 0))
-            if now >= due:
-                ready.append(message)
-                self.inflight[message["id"]] = (
-                    now + min(300, 30 * 2 ** min(attempts, 4)),
-                    attempts + 1,
+        self.store.db.execute("begin immediate")
+        try:
+            self.store.db.execute(
+                """
+                delete from consumer_offers where exists (
+                    select 1 from messages m
+                    where m.id=consumer_offers.message_id and m.acked_at is not null
                 )
-        return ready
+            """
+            )
+            # reserve half the batch for each class, sharing unused capacity.
+            new = self.store.db.execute(
+                """
+                select m.*, 0 as attempts from messages m
+                left join consumer_offers o on o.message_id=m.id
+                where m.direction='inbound' and m.acked_at is null and o.message_id is null
+                order by m.seq limit 8
+            """
+            ).fetchall()
+            retries = self.store.db.execute(
+                """
+                select m.*, o.attempts from consumer_offers o
+                join messages m on m.id=o.message_id
+                where m.acked_at is null and o.due<=?
+                order by o.due, m.seq limit ?
+            """,
+                (now, 8 - min(4, len(new))),
+            ).fetchall()
+            selected = sorted(
+                new[: 8 - len(retries)] + retries, key=lambda row: row["seq"]
+            )
+            for row in selected:
+                delay = min(300, 30 * 2 ** min(row["attempts"], 4))
+                self.store.db.execute(
+                    "insert or replace into consumer_offers values (?,?,?)",
+                    (row["id"], now + delay, row["attempts"] + 1),
+                )
+            self.store.db.execute("commit")
+            return [self.store.envelope(row) for row in selected]
+        except BaseException:
+            self.store.db.execute("rollback")
+            raise
 
 
 def active(store):
