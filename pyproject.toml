@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inbox-axi"
+version = "0.1.0"
+description = "a private, durable, threaded operator inbox"
+readme = "README.md"
+requires-python = ">=3.9"
+
+[project.optional-dependencies]
+codex = ["websockets>=15,<16"]
+dev = ["black==25.11.0"]
+
+[project.scripts]
+inbox-axi = "inbox_axi.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = false
+include = ["inbox_axi*"]
+
+[tool.setuptools.package-data]
+inbox_axi = ["adapters/*.ts", "adapters/*.mjs", "adapters/*.json"]
