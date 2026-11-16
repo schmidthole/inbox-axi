@@ -318,6 +318,32 @@ class Store:
         )
         return {"id": message_id, "incorporated": True}
 
+    def ack_status(self, message_ids):
+        if not isinstance(message_ids, list) or not 1 <= len(message_ids) <= 8:
+            raise InboxError("ack-status requires between 1 and 8 message identifiers")
+        for message_id in message_ids:
+            identifier(message_id, "msg")
+        rows = self.db.execute(
+            "select id, direction, acked_at from messages where id in ("
+            + ",".join("?" for _ in message_ids)
+            + ")",
+            message_ids,
+        ).fetchall()
+        by_id = {row["id"]: row for row in rows}
+        if any(message_id not in by_id for message_id in message_ids):
+            raise InboxError("unknown message identifier")
+        if any(row["direction"] != "inbound" for row in rows):
+            raise InboxError("only inbound messages have incorporation acknowledgments")
+        return {
+            "acknowledgments": [
+                {
+                    "id": message_id,
+                    "incorporated": by_id[message_id]["acked_at"] is not None,
+                }
+                for message_id in message_ids
+            ]
+        }
+
     def block_delivery(self, message_id, target, reason):
         self.message(message_id)
         self.db.execute(

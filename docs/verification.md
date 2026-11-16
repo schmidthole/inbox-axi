@@ -4,7 +4,9 @@ Automated suite: SQLite invariants, transaction retries, concurrent processes,
 CLI/stdin/JSON roundtrips, bounded input/pages, permissions/symlinks, consumer
 exclusion/backoff, fair new-input admission beyond eight unacked messages, due
 retries under continuing new input, crash/EOF release, stable-ID redelivery/no
-auto-ack, repeated Pi steering during one continuing busy run, and Codex local
+auto-ack, transformed Pi input and handled-input/all-vs-partial explicit ack,
+missing-progress deadline/shutdown recovery, repeated Pi steering during one
+continuing busy run, and Codex local
 WebSocket RPC identity/queue/steer/rejection/timeout/uncertainty/approval fixtures,
 Pi lifecycle/user-message API fixture, and official MCP SDK stdio Claude tools/
 notification fixture plus normal-entry automatic-push-disabled checks. CI is
@@ -43,7 +45,9 @@ For each supported installed harness, with operator authorization:
    native UI/messages and unrelated config are unchanged.
 2. While idle post text+data; confirm an actual native user/channel event starts a
    turn. Note the stable mailbox ID. Do not infer from consumer/API write success.
-3. During an executing native tool, post another message. Confirm delivery only at
+3. During an executing native tool, post another message. Exercise input hooks
+   that transform text or handle input, all-vs-partial explicit acknowledgment,
+   and the bounded missing-progress failure/recovery path. Confirm delivery only at
    the documented native boundary and before subsequent processing, not keystroke
    injection or competing session resume. Check long tool/retry/compaction behavior.
 4. Explicitly incorporate/ack and reply to exact IDs. Confirm reply persisted in

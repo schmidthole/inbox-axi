@@ -50,7 +50,8 @@ printf '%s' '{"text":"review result","data":{"score":42},"key":"job-42","metadat
 
 `--input-json FILE|-` accepts `text`, `data`, `thread_id`, `parent_id`, `key`, and
 new-thread-only `metadata`. `reply` requires both reference IDs and fixes direction
-outbound. Generated ID/order/time/direction/version fields are rejected in requests.
+outbound. `ack-status ID [ID ...]` reads incorporation flags for up to eight
+explicit IDs without acknowledging them. Generated ID/order/time/direction/version fields are rejected in requests.
 Text can instead use `--body-file FILE|-`, with optional `--data-json FILE` and
 `--metadata-json FILE`. See [the subprocess example](examples/external_program.py).
 
@@ -68,7 +69,9 @@ harness config is rewritten. Inspect and run the returned recipe yourself.
 
 - **Pi:** bundled native extension uses `sendUserMessage`, wakes idle sessions and
   queues busy input with native `steer` semantics. Requires a durable interactive
-  session; no prompt expansion, custom messages, or automatic output forwarding.
+  session; transformed marker observations or all-message explicit ack reopen a
+  bounded steering slot. Missing progress fails visibly after five minutes rather
+  than stalling silently. No prompt expansion or automatic output forwarding.
 - **Claude:** bundled Node ≥24 MCP SDK channel, launched by Claude over stdio.
   Install its optional Node dependencies using the printed `npm ci` recipe.
   **Tools-only by default:** explicit ack/reply, manual CLI read-thread. Automatic

@@ -44,10 +44,16 @@ Choose stable keys for external retries and replies.
   is either compact human output or explicit JSON. `consume`/`codex` emit JSON lines.
 
 Use `inbox-axi --help` and `inbox-axi COMMAND --help` for exact options. Supported
-commands: init, post, reply, read-thread, pending, ack, status, consume,
+commands: init, post, reply, read-thread, pending, ack, ack-status, status, consume,
 delivery-state, retry, codex, setup, doctor, uninstall.
 
 `pending` is unacknowledged **inbound** input only, not all unfinished work.
 Read-thread contains both directions forever. `ack MESSAGE_ID` is idempotent,
 records explicit incorporation, never deletes history or marks a task complete.
 Replies do not ack. There is no auto-forwarding of assistant output.
+
+
+`ack-status MESSAGE_ID [MESSAGE_ID ...]` reads incorporation flags for 1..8
+explicit inbound message IDs. It never acknowledges input or returns body content.
+The Pi adapter uses this bounded read to distinguish trusted explicit incorporation
+from mere transport writes or native observations.

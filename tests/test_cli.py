@@ -219,3 +219,21 @@ class CliTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["messages"], 0)
+
+    def test_ack_status_does_not_ack_and_reports_explicit_ids(self):
+        first = self.run_cli("post", "--body-file", "-", body="first")
+        second = self.run_cli("post", "--body-file", "-", body="second")
+        ids = [first["id"], second["id"]]
+        self.run_cli("ack", first["id"])
+        self.assertEqual(
+            self.run_cli("ack-status", *ids),
+            {
+                "acknowledgments": [
+                    {"id": first["id"], "incorporated": True},
+                    {"id": second["id"], "incorporated": False},
+                ]
+            },
+        )
+        self.assertEqual(self.run_cli("pending")["messages"], [second])
+        self.run_cli("ack-status", *(ids * 5), success=False)
+        self.run_cli("ack-status", "latest", success=False)

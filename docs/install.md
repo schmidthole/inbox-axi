@@ -28,7 +28,10 @@ Run the `setup pi` recipe: explicit native `pi -e ABSOLUTE_ASSET` plus
 permission extensions stay active. The extension never expands injected slash
 commands/templates and never rewrites the transcript. Session new/resume/fork/
 reload use native shutdown/start lifecycle; generation fencing disables old
-callbacks. Offline list-models loading and mock lifecycle tests are not live
+callbacks. The adapter requires bounded native `pi.exec` for read-only explicit
+ack-status checks. A missing native observation/all-message explicit incorporation
+ack fails visibly after five minutes and stops polling; see [delivery](delivery.md)
+for recovery and async input-hook semantics. Offline list-models loading and mock lifecycle tests are not live
 native delivery certification.
 
 ## Claude Code

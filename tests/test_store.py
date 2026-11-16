@@ -250,3 +250,28 @@ class StoreTests(unittest.TestCase):
         for message in initial:
             self.store.ack(message["id"])
         self.assertTrue(all(item["seq"] > 8 for item in consumer.poll(now=1000)))
+
+    def test_ack_status_is_bounded_read_only_and_explicit(self):
+        first, second = self.store.post(), self.store.post()
+        ids = [first["id"], second["id"]]
+        self.assertEqual(
+            self.store.ack_status(ids),
+            {
+                "acknowledgments": [
+                    {"id": first["id"], "incorporated": False},
+                    {"id": second["id"], "incorporated": False},
+                ]
+            },
+        )
+        self.store.ack(first["id"])
+        self.assertEqual(
+            self.store.ack_status(ids)["acknowledgments"],
+            [
+                {"id": first["id"], "incorporated": True},
+                {"id": second["id"], "incorporated": False},
+            ],
+        )
+        self.assertEqual(self.store.status()["pending"], 1)
+        for invalid in ([], ids * 5, [False], ["latest"], ["msg_" + "a" * 32], True):
+            with self.subTest(invalid=invalid), self.assertRaises(InboxError):
+                self.store.ack_status(invalid)

@@ -113,6 +113,11 @@ def parser():
         "ack", help="explicitly confirm incorporation, not completion"
     )
     command.add_argument("message")
+    command = commands.add_parser(
+        "ack-status",
+        help="read incorporation flags for 1..8 explicit message ids; never acknowledges",
+    )
+    command.add_argument("messages", nargs="+")
     for name in ("delivery-state", "retry"):
         command = commands.add_parser(
             name, help="inspect uncertain delivery or explicitly authorize retry"
@@ -229,6 +234,8 @@ def main(argv=None):
             )
         elif args.command == "ack":
             value = store.ack(args.message)
+        elif args.command == "ack-status":
+            value = store.ack_status(args.messages)
         elif args.command == "delivery-state":
             value = {"id": args.message, "block": store.delivery_block(args.message)}
         elif args.command == "retry":

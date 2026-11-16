@@ -36,22 +36,38 @@ after persisting enough working context to survive your own session reset.
 
 Pi's native user-message API wakes idle sessions; busy `steer` delivery waits for
 the current assistant turn's tool calls before another model request. There is one
-outstanding native batch and at most one deferred batch. Input reads pause behind
-that bounded slot. A matching native `message_start` user event releases the slot
-as soon as the batch is observed consumed, even while the same agent run remains
-busy. Matching requires the exact injected text, including stable envelope IDs and
-a fresh per-offer delivery UUID, plus the current durable session ID/file and
-runtime generation. Unrelated messages and stale observations cannot release it.
-The next deferred batch can then steer before the run finally settles.
+adapter-outstanding native batch and at most one deferred batch. Input reads pause
+behind that bounded slot. A native `message_start` user event releases the slot
+when it contains the generated delivery UUID marker and all original message IDs,
+under the current durable session ID/file and generation. Whole-text equality is
+not required: hooks can prepend/append/reformat text while preserving those IDs.
+Unrelated messages, wrong markers and stale observations cannot release the slot.
+The next deferred batch can steer during the same continuing busy run.
 
-Native observation is not incorporation: no automatic ack occurs. Pending input
-still retries with consumer backoff. A genuinely idle session with no native
-pending messages can also reopen the slot, including when an input hook handled a
-message without starting a run. Input hooks that transform injected content can
-prevent exact observation matching; the adapter does not mistake unrelated text
-for receipt. Shutdown increments a generation fence before killing its child and
-discarding deferred input, so callbacks cannot target a replacement runtime.
-Ephemeral/noninteractive modes fail.
+A one-second, single-flight check also reads `ack-status` for at most eight
+outstanding IDs through a five-second/8-KiB bounded CLI call. Explicit incorporation
+ack of **all** IDs is trusted operator authority to retire that adapter batch;
+partial ack does not release it. The native queue must also be empty as a
+conservative guard. This supports hooks that handle input without emitting a user
+message, or transformations that remove markers, once the operator explicitly
+incorporates the batch. Observation never auto-acks and queue emptiness alone
+never proves incorporation, hook completion or delivery.
+
+An async input hook can still be in preflight after an explicit external ack;
+Pi's public API does not expose handled/preflight completion. Ack authorizes
+progress under the trusted-writer contract, **does not cancel that preflight**, and
+is not proof it drained. False/premature ack is caller misuse, not an exactly-once
+guarantee. Without a matching observation or all-message explicit ack, five
+minutes triggers an actionable error/inactive status, stops the consumer and
+releases ownership rather than freezing silently or blindly adding native input.
+The bounded status check/shutdown can add up to their timeouts. Pending mail is
+retained; native queued/preflight input is not canceled. Inspect pending IDs,
+resolve input hooks, explicitly ack only incorporated messages, then relaunch.
+
+Neither an idle flag nor final settlement substitutes for these signals.
+Shutdown clears the progress timer, increments the generation fence, kills its
+child and discards deferred input, preventing stale callbacks from targeting a
+replacement runtime. Ephemeral/noninteractive modes fail.
 
 Claude automatic push is **disabled in the normal entry**. The native MCP channel
 protocol lacks an atomic target-session precondition. `/clear` SessionStart hooks
