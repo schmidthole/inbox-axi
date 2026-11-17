@@ -8,6 +8,8 @@ auto-ack, transformed Pi input and handled-input/all-vs-partial explicit ack,
 missing-progress deadline/shutdown recovery, repeated Pi steering during one
 continuing busy run, and Codex local
 WebSocket RPC identity/queue/steer/rejection/timeout/uncertainty/approval fixtures,
+malformed error-shape/exclusivity cases with actual CLI restart/no-resend checks,
+and native error-message/data/stack stdout sanitization,
 Codex delivered read-thread/reply/ack argv against a custom mailbox (source and
 isolated installed npm package), shared uncertainty gating across consumer changes
 and due retries,

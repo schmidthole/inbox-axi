@@ -95,21 +95,51 @@ export class RPC implements Caller {
           );
         const pending = this.pending;
         if (!pending || frame.id !== pending.id) return;
-        this.pending = undefined;
-        clearTimeout(pending.timer);
-        if ("error" in frame)
+        const hasError = Object.hasOwn(frame, "error");
+        const hasResult = Object.hasOwn(frame, "result");
+        if (hasError === hasResult)
+          throw new InboxError(
+            "invalid native response; submission remains uncertain",
+            "UNCERTAIN_DELIVERY",
+            [
+              "inspect the selected thread in the native ui before explicitly acknowledging or retrying the blocked message",
+            ],
+          );
+        if (hasError) {
+          const error = frame.error;
+          if (
+            !object(error) ||
+            typeof error.code !== "number" ||
+            !Number.isSafeInteger(error.code) ||
+            typeof error.message !== "string"
+          )
+            throw new InboxError(
+              "invalid native rejection; submission remains uncertain",
+              "UNCERTAIN_DELIVERY",
+              [
+                "inspect the selected thread in the native ui before explicitly acknowledging or retrying the blocked message",
+              ],
+            );
+          this.pending = undefined;
+          clearTimeout(pending.timer);
           pending.reject(
             new RpcError(
-              "codex rpc rejected request: " + canonical(frame.error),
+              "the selected native session rejected the request",
+              "NATIVE_REJECTION",
+              [
+                "inspect the selected thread in the native ui, resolve the rejection, then relaunch inbox-axi codex with the same explicit bindings",
+              ],
             ),
           );
-        else if (!object(frame.result))
-          pending.reject(
-            new InboxError(
-              "invalid codex rpc result; submission may be uncertain",
-            ),
+          return;
+        }
+        if (!object(frame.result))
+          throw new InboxError(
+            "invalid codex rpc result; submission may be uncertain",
           );
-        else pending.resolve(frame.result);
+        this.pending = undefined;
+        clearTimeout(pending.timer);
+        pending.resolve(frame.result);
       } catch (error) {
         this.fail(
           error instanceof InboxError

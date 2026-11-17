@@ -125,8 +125,10 @@ and restore any generic associated task context from the returned metadata.
 The reply argv uses the exact thread and parent IDs and reads explicit reply text
 from stdin. Replies never ack or automatically forward assistant transcripts.
 
-Before a Codex mutating RPC, a durable delivery block is stored. A definitive
-JSON-RPC rejection clears it; a matching successful response clears it but does
+Before a Codex mutating RPC, a durable delivery block is stored. A well-formed
+JSON-RPC rejection (integer code, string message, no simultaneous result) clears it;
+arbitrary native error messages/data are replaced with sanitized inbox-facing diagnostics.
+Malformed error envelopes retain uncertainty. A matching successful response clears it but does
 **not** ack. Timeout, disconnect, malformed response or crash leaves uncertainty
 blocked across restarts and consumer/adapter changes. `status` counts blocked pending items. Inspect
 `delivery-state MESSAGE_ID`; reconcile in the native UI, then either explicitly

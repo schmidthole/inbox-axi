@@ -5,7 +5,7 @@ import { WebSocketServer } from "ws";
 import { chmodSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import {
   RPC,
   RpcError,
@@ -16,6 +16,7 @@ import {
 } from "../../dist/adapters/codex.js";
 import { Store } from "../../src/store.js";
 import { canonical, parseJson } from "../../src/codec.js";
+import { active } from "../../src/delivery.js";
 import { batchFrame, cliBinding } from "../../dist/adapters/runtime.js";
 
 const thread = "019a7d37-3067-7000-8000-000000000001";
@@ -33,6 +34,7 @@ async function fixture(t: TestContext) {
     malformed: false,
     disconnect: false,
     beforeMutation: () => {},
+    response: undefined as Record<string, unknown> | undefined,
   };
   wss.on("connection", (ws) =>
     ws.on("message", (raw) => {
@@ -65,6 +67,10 @@ async function fixture(t: TestContext) {
         state.beforeMutation();
         if (state.disconnect) {
           ws.terminate();
+          return;
+        }
+        if (state.response) {
+          ws.send(canonical({ id, ...state.response }));
           return;
         }
         if (state.reject) {
@@ -294,3 +300,172 @@ test("adapter frame codec retains full 64-bit sequences and rejects corrupt fram
   );
   assert.throws(() => cliBinding("relative"), /absolute/);
 });
+
+const malformedErrors: Array<[string, Record<string, unknown>]> = [
+  ["null", { error: null }],
+  ["array", { error: [] }],
+  ["string", { error: "secret-native-error-marker" }],
+  ["empty object", { error: {} }],
+  ["missing code", { error: { message: "secret-native-error-marker" } }],
+  ["missing message", { error: { code: -32600 } }],
+  [
+    "string code",
+    { error: { code: "-32600", message: "secret-native-error-marker" } },
+  ],
+  [
+    "fractional code",
+    { error: { code: -32600.5, message: "secret-native-error-marker" } },
+  ],
+  ["nonstring message", { error: { code: -32600, message: null } }],
+  [
+    "result and error",
+    {
+      result: { queuedSubmission: { id: "accepted" } },
+      error: { code: -32600, message: "secret-native-error-marker" },
+    },
+  ],
+  ["no result or error", {}],
+];
+for (const [name, response] of malformedErrors) {
+  test(`codex malformed error ${name} retains uncertainty and cannot resend`, async (t) => {
+    const f = await fixture(t);
+    f.state.response = response;
+    const message = f.store.post({});
+    await assert.rejects(
+      deliver(f.store, f.rpc, thread, "fixture", message),
+      (error) => {
+        assert.ok(!(error instanceof RpcError));
+        assert.match(String(error), /uncertain/);
+        assert.ok(!String(error).includes("secret-native-error-marker"));
+        return true;
+      },
+    );
+    const count = f.calls.length;
+    const reopened = new Store(f.store.root);
+    try {
+      assert.ok(reopened.deliveryBlock(message.id));
+      assert.equal(reopened.status().pending, 1);
+      await assert.rejects(
+        deliver(reopened, f.rpc, thread, "fixture", message),
+        /blocked/,
+      );
+      assert.equal(f.calls.length, count);
+    } finally {
+      reopened.close();
+    }
+  });
+}
+function launchCodex(
+  f: Awaited<ReturnType<typeof fixture>>,
+  onReady?: () => void,
+) {
+  const child = spawn(
+    process.execPath,
+    [
+      resolve("bin/inbox-axi.js"),
+      "codex",
+      "--json",
+      "--home",
+      f.store.root,
+      "--socket",
+      f.socket,
+      "--codex-home",
+      f.home,
+      "--server-version",
+      "0.169.0",
+      "--thread",
+      thread,
+    ],
+    { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stdout = "",
+    stderr = "";
+  const timer = setTimeout(() => child.kill("SIGKILL"), 4000);
+  child.stdout.on("data", (chunk) => {
+    stdout += chunk;
+    if (stdout.includes('"event":"ready"')) onReady?.();
+  });
+  child.stderr.on("data", (chunk) => (stderr += chunk));
+  const result = new Promise<{
+    code: number | null;
+    stdout: string;
+    stderr: string;
+  }>((accept) =>
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      accept({ code, stdout, stderr });
+    }),
+  );
+  return { child, result };
+}
+test("codex cli sanitizes native rejection payload and preserves definite rejection semantics", async (t) => {
+  const f = await fixture(t);
+  f.state.mode = "active";
+  f.state.response = {
+    error: {
+      code: -32600,
+      message: "internal dependency stack: secret-native-error-marker",
+      data: { stack: "sensitive native stack" },
+    },
+  };
+  const message = f.store.post({});
+  const result = await launchCodex(f).result;
+  assert.equal(result.code, 1, result.stdout + result.stderr);
+  const frames = result.stdout
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(frames[0].event, "ready");
+  assert.equal(frames[1].code, "NATIVE_REJECTION");
+  assert.match(frames[1].help[0], /native ui/);
+  assert.match(frames[1].help[0], /inbox-axi codex/);
+  assert.ok(
+    !/secret-native-error-marker|sensitive native stack|internal dependency/.test(
+      result.stdout,
+    ),
+  );
+  assert.equal(f.store.deliveryBlock(message.id), null);
+  assert.equal(f.store.status().pending, 1);
+  assert.equal(active(f.store), false);
+  assert.equal(
+    f.calls.filter((call) => call.method === "turn/steer").length,
+    1,
+  );
+  assert.ok(!f.calls.some((call) => call.method === "thread/queue/add"));
+});
+for (const [name, response] of malformedErrors) {
+  test(`codex cli malformed ${name} exits promptly and restart never resends`, async (t) => {
+    const f = await fixture(t);
+    f.state.response = response;
+    const message = f.store.post({});
+    const result = await launchCodex(f).result;
+    assert.equal(result.code, 1, result.stdout + result.stderr);
+    const error = JSON.parse(result.stdout.trim().split("\n").at(-1)!);
+    assert.equal(error.code, "UNCERTAIN_DELIVERY");
+    assert.ok(!/secret-native-error-marker|stack/.test(result.stdout));
+    assert.equal(active(f.store), false);
+    const reopened = new Store(f.store.root);
+    try {
+      assert.ok(reopened.deliveryBlock(message.id));
+      assert.equal(reopened.status().pending, 1);
+    } finally {
+      reopened.close();
+    }
+    const before = f.calls.filter(
+      (call) => call.method === "thread/queue/add",
+    ).length;
+    let stopTimer: ReturnType<typeof setTimeout> | undefined;
+    const restarted = launchCodex(f, () => {
+      stopTimer ??= setTimeout(() => restarted.child.kill("SIGTERM"), 50);
+    });
+    const retry = await restarted.result;
+    if (stopTimer) clearTimeout(stopTimer);
+    assert.equal(retry.code, 0, retry.stdout + retry.stderr);
+    assert.equal(
+      f.calls.filter((call) => call.method === "thread/queue/add").length,
+      before,
+    );
+    assert.ok(f.store.deliveryBlock(message.id));
+    assert.equal(active(f.store), false);
+  });
+}
