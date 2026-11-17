@@ -232,7 +232,7 @@ function preview(
   }
   if (truncated)
     out.help = [
-      `${commandPrefix(args)} read-thread ${message.thread_id} --full`,
+      `${commandPrefix(args)} read-thread ${message.thread_id} --after ${BigInt(message.seq) - 1n} --limit 1 --full`,
     ];
   return out;
 }
@@ -270,7 +270,7 @@ function display(
           : [`${prefix} post --body-file <file>`];
     if (value.next_cursor !== null)
       hints.push(
-        `${prefix} ${command}${command === "read-thread" ? " " + args.positionals[0] : ""} --after ${value.next_cursor} --limit ${args.flags["--limit"] ?? 20}`,
+        `${prefix} ${command}${command === "read-thread" ? " " + args.positionals[0] : ""} --after ${value.next_cursor} --limit ${args.flags["--limit"] ?? 20}${args.flags["--full"] ? " --full" : ""}${args.flags["--fields"] ? ` --fields ${shellQuote(String(args.flags["--fields"]))}` : ""}`,
       );
     if (hints.length) result.help = hints;
     return result;

@@ -9,6 +9,7 @@ import {
   writeFileSync,
   statSync,
   realpathSync,
+  chmodSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -511,3 +512,241 @@ test(
     }
   },
 );
+
+function executeHint(f: ReturnType<typeof fixture>, command: string): any {
+  const path = join(f.root, "bin");
+  mkdirSync(path, { recursive: true });
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
+  const wrapper = join(path, "inbox-axi");
+  writeFileSync(
+    wrapper,
+    `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(BIN)} "$@"\n`,
+  );
+  chmodSync(wrapper, 0o700);
+  const result = spawnSync("/bin/sh", ["-c", command], {
+    cwd: f.workspace,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      HOME: f.user,
+      PATH: path,
+      INBOX_AXI_HOME: join(f.root, "different-mailbox"),
+    },
+  });
+  assert.equal(
+    result.status,
+    0,
+    command + "\n" + result.stdout + result.stderr,
+  );
+  return decode(result.stdout);
+}
+function fullHint(value: { help: string[] }): string {
+  const command = value.help.find((line) => line.includes("--full"));
+  assert.ok(command, "truncated content must provide a full command");
+  return command;
+}
+function continuation(value: { help: string[] }): string {
+  const command = value.help.find((line) => line.includes("--after"));
+  assert.ok(command, "a partial page must provide a continuation command");
+  return command;
+}
+function expanded(
+  f: ReturnType<typeof fixture>,
+  preview: { help: string[] },
+  id: string,
+  text: string,
+  data: unknown,
+) {
+  const page = executeHint(f, fullHint(preview));
+  assert.equal(page.count, 1);
+  assert.equal(page.messages[0].id, id);
+  assert.equal(page.messages[0].text, text);
+  assert.deepEqual(JSON.parse(page.messages[0].data), data);
+  assert.equal(page.messages[0].text_length, undefined);
+  assert.equal(page.messages[0].data_length, undefined);
+}
+test("executed full hints reach later-page post reply pending and thread content across sequence gaps", async () => {
+  const f = fixture();
+  f.home = join(f.root, "mailbox with 'quotes' $cash `literal`");
+  try {
+    const { Store } = await import("../../src/store.js");
+    const store = new Store(f.home);
+    const first = store.post({ text: "short 0" });
+    let previous = first;
+    for (let n = 1; n < 20; n++) {
+      store.post({ text: "another thread" });
+      previous = store.post({ thread_id: first.thread_id, text: `short ${n}` });
+    }
+    store.close();
+    const text = "later-page text ".repeat(90);
+    const data = { body: "later-page data ".repeat(90) };
+    const posted = toon(
+      f,
+      ["post", "--home", f.home, "--input-json", "-"],
+      JSON.stringify({ thread_id: first.thread_id, text, data }),
+    );
+    expanded(f, posted, posted.id, text, data);
+    const reply = toon(
+      f,
+      ["reply", "--home", f.home, "--input-json", "-"],
+      JSON.stringify({
+        thread_id: first.thread_id,
+        parent_id: posted.id,
+        text,
+        data,
+      }),
+    );
+    expanded(f, reply, reply.id, text, data);
+    const pending = toon(f, [
+      "pending",
+      "--home",
+      f.home,
+      "--after",
+      String(previous.seq),
+      "--fields",
+      "text,data",
+    ]);
+    assert.equal(pending.messages.length, 1);
+    assert.equal(pending.messages[0].seq, undefined);
+    expanded(f, pending.messages[0], posted.id, text, data);
+    const detail = toon(f, [
+      "read-thread",
+      first.thread_id,
+      "--home",
+      f.home,
+      "--after",
+      String(previous.seq),
+      "--fields",
+      "text,data",
+    ]);
+    assert.equal(detail.messages.length, 2);
+    for (const [n, id] of [posted.id, reply.id].entries())
+      expanded(f, detail.messages[n], id, text, data);
+    const machine = json(f, [
+      "read-thread",
+      first.thread_id,
+      "--after",
+      String(previous.seq),
+      "--fields",
+      "id",
+    ]);
+    assert.equal(machine.messages[0].text, text);
+    assert.deepEqual(machine.messages[0].data, data);
+    for (const selector of [["read-thread", first.thread_id], ["pending"]]) {
+      const firstPage = toon(f, [
+        ...selector,
+        "--home",
+        f.home,
+        "--limit",
+        "20",
+        "--full",
+        "--fields",
+        "id,text,data",
+      ]);
+      const nextPage = executeHint(f, continuation(firstPage));
+      assert.equal(nextPage.count, selector[0] === "pending" ? 20 : 2);
+      const target = nextPage.messages.find(
+        (message: { id: string }) => message.id === posted.id,
+      );
+      assert.ok(target);
+      assert.deepEqual(Object.keys(target), ["id", "text", "data"]);
+      assert.equal(target.text, text);
+      assert.deepEqual(JSON.parse(target.data), data);
+      assert.equal(target.help, undefined);
+    }
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+test("executed full and continuation hints preserve exact signed64 cursors with seq omitted", async () => {
+  const f = fixture();
+  try {
+    const { Store } = await import("../../src/store.js");
+    const store = new Store(f.home);
+    const first = store.post({ text: "first" });
+    store.db
+      .prepare("update sqlite_sequence set seq=? where name=?")
+      .run(9223372036854775804n, "messages");
+    store.post({ text: "unrelated thread" });
+    store.close();
+    const text = "large cursor text ".repeat(90),
+      data = { body: "large cursor data ".repeat(90) };
+    const posted = toon(
+      f,
+      [
+        "post",
+        "--home",
+        f.home,
+        "--fields",
+        "id,text,data",
+        "--input-json",
+        "-",
+      ],
+      JSON.stringify({ thread_id: first.thread_id, text, data }),
+    );
+    assert.equal(posted.seq, undefined);
+    expanded(f, posted, posted.id, text, data);
+    const reply = toon(
+      f,
+      [
+        "reply",
+        "--home",
+        f.home,
+        "--fields",
+        "id,text,data",
+        "--input-json",
+        "-",
+      ],
+      JSON.stringify({
+        thread_id: first.thread_id,
+        parent_id: posted.id,
+        text,
+        data,
+      }),
+    );
+    expanded(f, reply, reply.id, text, data);
+    const pending = toon(f, [
+      "pending",
+      "--home",
+      f.home,
+      "--after",
+      "9223372036854775805",
+      "--fields",
+      "text,data",
+    ]);
+    expanded(f, pending.messages[0], posted.id, text, data);
+    const page = toon(f, [
+      "read-thread",
+      first.thread_id,
+      "--home",
+      f.home,
+      "--after",
+      "1",
+      "--limit",
+      "1",
+      "--full",
+      "--fields",
+      "id,text,data",
+    ]);
+    assert.equal(page.next_cursor, "9223372036854775806");
+    const next = executeHint(f, continuation(page));
+    assert.equal(next.count, 1);
+    assert.equal(next.messages[0].id, reply.id);
+    assert.equal(next.messages[0].text, text);
+    assert.deepEqual(JSON.parse(next.messages[0].data), data);
+    assert.deepEqual(Object.keys(next.messages[0]), ["id", "text", "data"]);
+    const detail = toon(f, [
+      "read-thread",
+      first.thread_id,
+      "--home",
+      f.home,
+      "--after",
+      "9223372036854775806",
+      "--fields",
+      "text,data",
+    ]);
+    expanded(f, detail.messages[0], reply.id, text, data);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
