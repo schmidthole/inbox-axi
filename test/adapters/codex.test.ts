@@ -31,6 +31,7 @@ async function fixture(t: TestContext) {
   const state = {
     mode: "idle",
     reject: false,
+    resultPadding: "",
     malformed: false,
     disconnect: false,
     beforeMutation: () => {},
@@ -84,6 +85,11 @@ async function fixture(t: TestContext) {
           : method === "turn/steer"
             ? { turnId: turn }
             : { queuedSubmission: { id: "native-queue-id" } };
+        if (state.resultPadding)
+          result = {
+            ...(result as Record<string, unknown>),
+            diagnostic: state.resultPadding,
+          };
       } else if (method === "fixture/approval") {
         ws.send(
           canonical({
@@ -358,10 +364,14 @@ for (const [name, response] of malformedErrors) {
 function launchCodex(
   f: Awaited<ReturnType<typeof fixture>>,
   onReady?: () => void,
+  options: { paused?: boolean; observed?: boolean; timeout?: number } = {},
 ) {
   const child = spawn(
     process.execPath,
     [
+      ...(options.observed
+        ? ["--import", resolve("test/adapters/stdout-observer.mjs")]
+        : []),
       resolve("bin/inbox-axi.js"),
       "codex",
       "--json",
@@ -380,7 +390,10 @@ function launchCodex(
   );
   let stdout = "",
     stderr = "";
-  const timer = setTimeout(() => child.kill("SIGKILL"), 4000);
+  const timer = setTimeout(
+    () => child.kill("SIGKILL"),
+    options.timeout ?? 4000,
+  );
   child.stdout.on("data", (chunk) => {
     stdout += chunk;
     if (stdout.includes('"event":"ready"')) onReady?.();
@@ -396,7 +409,8 @@ function launchCodex(
       accept({ code, stdout, stderr });
     }),
   );
-  return { child, result };
+  if (options.paused) child.stdout.pause();
+  return { child, result, output: () => stdout, diagnostics: () => stderr };
 }
 test("codex cli sanitizes native rejection payload and preserves definite rejection semantics", async (t) => {
   const f = await fixture(t);
@@ -469,3 +483,126 @@ for (const [name, response] of malformedErrors) {
     assert.equal(active(f.store), false);
   });
 }
+
+async function waitFor(predicate: () => boolean, timeout = 3000) {
+  const deadline = performance.now() + timeout;
+  while (!predicate()) {
+    assert.ok(
+      performance.now() < deadline,
+      "fixture condition did not arrive before timeout",
+    );
+    await new Promise((accept) => setTimeout(accept, 20));
+  }
+}
+function writes(launch: ReturnType<typeof launchCodex>) {
+  return launch
+    .diagnostics()
+    .split("\n")
+    .filter((line) => line.startsWith('{"stdout_write":'))
+    .map((line) => JSON.parse(line) as { accepted: boolean; buffered: number });
+}
+async function stalledCodex(t: TestContext, count = 48) {
+  const f = await fixture(t);
+  f.state.resultPadding = "x".repeat(65536);
+  for (let n = 0; n < count; n++) f.store.post({ text: "operator fixture" });
+  const launch = launchCodex(f, undefined, {
+    paused: true,
+    observed: true,
+    timeout: 12000,
+  });
+  t.after(() => {
+    if (launch.child.exitCode === null) launch.child.kill("SIGKILL");
+    launch.child.stdout.resume();
+  });
+  await waitFor(() =>
+    writes(launch).some((record) => !record.accepted && record.buffered > 0),
+  );
+  await new Promise((accept) => setTimeout(accept, 300));
+  return {
+    f,
+    launch,
+    mutations: () =>
+      f.calls.filter((call) => call.method === "thread/queue/add").length,
+  };
+}
+test(
+  "codex stalled stdout bounds native admissions and sigterm exits before downstream drain",
+  { timeout: 10000 },
+  async (t) => {
+    const { f, launch, mutations } = await stalledCodex(t);
+    const before = mutations();
+    assert.ok(before > 0 && before < 48);
+    await new Promise((accept) => setTimeout(accept, 1250));
+    assert.equal(mutations(), before);
+    assert.ok(
+      Math.max(...writes(launch).map((record) => record.buffered)) < 131072,
+    );
+    const exited = new Promise<number | null>((accept) =>
+      launch.child.once("exit", accept),
+    );
+    launch.child.kill("SIGTERM");
+    assert.equal(
+      await Promise.race([
+        exited,
+        new Promise((accept) => setTimeout(() => accept("timeout"), 1000)),
+      ]),
+      0,
+    );
+    assert.equal(active(f.store), false);
+    assert.equal(f.store.status().pending, 48);
+    launch.child.stdout.resume();
+    assert.equal((await launch.result).code, 0);
+  },
+);
+test(
+  "codex resumes native delivery only when stalled stdout drains",
+  { timeout: 10000 },
+  async (t) => {
+    const { f, launch, mutations } = await stalledCodex(t, 16);
+    const before = mutations();
+    assert.ok(before > 0 && before < 16);
+    launch.child.stdout.resume();
+    await waitFor(() => mutations() === 16, 6000);
+    await waitFor(
+      () =>
+        launch
+          .output()
+          .split("\n")
+          .filter((line) =>
+            line.includes('"state":"submitted_not_acknowledged"'),
+          ).length === 16,
+    );
+    launch.child.kill("SIGTERM");
+    assert.equal((await launch.result).code, 0);
+    assert.equal(active(f.store), false);
+    assert.equal(f.store.status().pending, 16);
+    assert.ok(writes(launch).some((record) => !record.accepted));
+    assert.ok(
+      Math.max(...writes(launch).map((record) => record.buffered)) < 131072,
+    );
+  },
+);
+test(
+  "codex closed downstream cancels blocked output and releases ownership without acknowledgment",
+  { timeout: 10000 },
+  async (t) => {
+    const { f, launch, mutations } = await stalledCodex(t);
+    const before = mutations();
+    const exited = new Promise<number | null>((accept) =>
+      launch.child.once("exit", accept),
+    );
+    launch.child.stdout.destroy();
+    assert.equal(
+      await Promise.race([
+        exited,
+        new Promise((accept) => setTimeout(() => accept("timeout"), 1000)),
+      ]),
+      0,
+    );
+    assert.equal((await launch.result).code, 0);
+    assert.equal(mutations(), before);
+    assert.equal(active(f.store), false);
+    assert.equal(f.store.status().pending, 48);
+    assert.ok(!/unhandled|Error:| at .*\.js:/.test(launch.diagnostics()));
+  },
+);

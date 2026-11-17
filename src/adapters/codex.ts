@@ -394,10 +394,36 @@ export async function run(
   const consumer = new Consumer(store);
   let rpc: RPC | undefined;
   const controller = new AbortController();
-  const stop = () => controller.abort();
+  let discardedOutput = false;
+  const stop = () => {
+    if (controller.signal.aborted) return;
+    controller.abort();
+    rpc?.close();
+    discardedOutput = process.stdout.writableLength > 0;
+  };
+  async function write(value: unknown): Promise<boolean> {
+    if (controller.signal.aborted) return false;
+    if (!process.stdout.write(canonical(value) + "\n")) {
+      await new Promise<void>((accept) => {
+        const done = () => {
+          process.stdout.off("drain", done);
+          controller.signal.removeEventListener("abort", done);
+          accept();
+        };
+        process.stdout.once("drain", done);
+        controller.signal.addEventListener("abort", done, { once: true });
+        if (controller.signal.aborted || process.stdout.destroyed) done();
+      });
+    }
+    return !controller.signal.aborted;
+  }
+  process.stdout.on("error", stop);
+  process.stdout.on("close", stop);
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
   try {
+    if (process.stdout.destroyed) stop();
+    if (controller.signal.aborted) return discardedOutput;
     rpc = new RPC(args.socket);
     await rpc.initialize(args.codexHome, args.serverVersion);
     await threadState(rpc, args.thread);
@@ -408,17 +434,19 @@ export async function run(
       thread: args.thread,
     };
     const target = canonical(binding);
-    process.stdout.write(
-      canonical({ event: "ready", target: binding, live_verified: false }) +
-        "\n",
-    );
+    if (
+      !(await write({ event: "ready", target: binding, live_verified: false }))
+    )
+      return discardedOutput;
     while (!controller.signal.aborted) {
       for (const message of consumer.poll()) {
-        process.stdout.write(
-          canonical(await deliver(store, rpc, args.thread, target, message)) +
-            "\n",
-        );
         if (controller.signal.aborted) break;
+        if (
+          !(await write(
+            await deliver(store, rpc, args.thread, target, message),
+          ))
+        )
+          break;
       }
       try {
         await delay(1000, undefined, { signal: controller.signal });
@@ -426,10 +454,23 @@ export async function run(
         if (!controller.signal.aborted) throw error;
       }
     }
+  } catch (error) {
+    if (!controller.signal.aborted) throw error;
   } finally {
     rpc?.close();
     consumer.close();
+    process.stdout.off("close", stop);
+    if (discardedOutput) {
+      const cleanup = () => {
+        process.stdout.off("error", stop);
+        process.stdout.off("drain", cleanup);
+        process.stdout.off("close", cleanup);
+      };
+      process.stdout.once("drain", cleanup);
+      process.stdout.once("close", cleanup);
+    } else process.stdout.off("error", stop);
     process.off("SIGTERM", stop);
     process.off("SIGINT", stop);
   }
+  return discardedOutput;
 }

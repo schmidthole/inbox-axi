@@ -8,6 +8,14 @@ crash. Lockfiles remain on disk; their existence does not mean active ownership.
 Pi/Claude child consumers also watch a dedicated stdin pipe: parent death/EOF
 stops them within one polling interval, even with no pending messages.
 
+Standalone Codex waits for stdout drain after each ready/submission JSONL frame
+before admitting more native deliveries. Buffered telemetry is bounded by the stream high-water mark plus a single
+frame (native responses are capped at 1 MiB). SIGINT/SIGTERM and downstream closure
+cancel the wait and close the RPC/consumer/store. The executable exits after
+cleanup even when a stalled pipe cannot flush; canceled telemetry may be incomplete,
+but durable messages remain pending until explicit incorporation. Reading stdout
+again resumes delivery without changing those acknowledgment rules.
+
 The deterministic consumer checks once per second, independent of model turns.
 Each offer contains at most eight messages. New pending input is admitted in FIFO
 server order independently of older unacknowledged input. When both classes have

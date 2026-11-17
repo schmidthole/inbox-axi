@@ -412,13 +412,12 @@ async function execute(command: string, args: Args): Promise<unknown> {
         return;
       case "codex": {
         const { run } = await import("./adapters/codex.js");
-        await run(store, {
+        return await run(store, {
           socket: String(args.flags["--socket"]),
           codexHome: String(args.flags["--codex-home"]),
           serverVersion: String(args.flags["--server-version"]),
           thread: String(args.flags["--thread"]),
         });
-        return;
       }
       case "home": {
         const page = store.page({ pending: true, limit: 5 });
@@ -471,7 +470,9 @@ function formatted(
     exitCode: code === "VALIDATION_ERROR" ? 2 : 1,
   };
 }
-export async function main(argv = process.argv.slice(2)): Promise<void> {
+export async function main(
+  argv = process.argv.slice(2),
+): Promise<{ discardBufferedOutput: true } | void> {
   const normalized = normalize(argv);
   const command = normalized[0] ?? "home";
   const json = normalized.includes("--json");
@@ -480,7 +481,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     !normalized.includes("--help")
   ) {
     try {
-      await execute(command, parse(command, normalized.slice(1)));
+      const discarded = await execute(
+        command,
+        parse(command, normalized.slice(1)),
+      );
+      if (command === "codex" && discarded === true)
+        return { discardBufferedOutput: true };
     } catch (error) {
       const result = formatted(error, json, command);
       process.stdout.write(result.output);
@@ -523,5 +529,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-)
-  await main();
+) {
+  const result = await main();
+  // canceled output must not delay standalone exit after durable cleanup.
+  if (result?.discardBufferedOutput) process.exit(process.exitCode ?? 0);
+}
