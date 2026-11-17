@@ -1,0 +1,46 @@
+{
+  "name": "inbox-axi",
+  "version": "0.2.0",
+  "description": "private durable operator inbox for native coding-agent sessions",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "inbox-axi": "bin/inbox-axi.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "skills",
+    "README.md",
+    "docs",
+    "examples"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "format": "prettier --write src test scripts bin package.json tsconfig.json README.md docs examples skills Makefile --ignore-unknown",
+    "format:check": "prettier --check src test scripts bin package.json tsconfig.json README.md docs examples skills --ignore-unknown",
+    "test": "node --import tsx --test test/core/*.test.ts test/adapters/*.test.ts test/cli/*.test.ts",
+    "skill": "node --import tsx scripts/generate-skill.ts",
+    "skill:check": "node --import tsx scripts/generate-skill.ts --check",
+    "prepack": "npm run build && npm run skill:check",
+    "pretest": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@toon-format/toon": "2.3.1",
+    "axi-sdk-js": "0.1.14",
+    "fs-ext": "2.1.1",
+    "jsonc-parser": "3.3.1",
+    "ws": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/fs-ext": "2.0.3",
+    "@types/node": "24.10.1",
+    "@types/ws": "8.18.1",
+    "prettier": "3.6.2",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

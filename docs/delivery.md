@@ -8,6 +8,14 @@ crash. Lockfiles remain on disk; their existence does not mean active ownership.
 Pi/Claude child consumers also watch a dedicated stdin pipe: parent death/EOF
 stops them within one polling interval, even with no pending messages.
 
+Standalone Codex waits for stdout drain after each ready/submission JSONL frame
+before admitting more native deliveries. Buffered telemetry is bounded by the stream high-water mark plus a single
+frame (native responses are capped at 1 MiB). SIGINT/SIGTERM and downstream closure
+cancel the wait and close the RPC/consumer/store. The executable exits after
+cleanup even when a stalled pipe cannot flush; canceled telemetry may be incomplete,
+but durable messages remain pending until explicit incorporation. Reading stdout
+again resumes delivery without changing those acknowledgment rules.
+
 The deterministic consumer checks once per second, independent of model turns.
 Each offer contains at most eight messages. New pending input is admitted in FIFO
 server order independently of older unacknowledged input. When both classes have
@@ -21,7 +29,7 @@ Per-message redelivery waits 30, 60, 120, 240, then at most 300 seconds. Schedul
 metadata lives in a connection-private, file-backed SQLite temporary table, with
 one small record per offered pending message, not a growing in-memory batch or
 native queue. Acked records are excluded and removed on the next poll. Only bounded
-query pages/batches are loaded into Python memory. The table disappears on consumer
+query pages/batches are loaded into JavaScript memory. The table disappears on consumer
 shutdown/crash; restart can immediately redeliver stable message IDs in FIFO order.
 Durable uncertainty blocks are excluded from both new offers and due retries by
 this shared consumer, including manual consume and Pi/Claude after switching from
@@ -115,18 +123,20 @@ there is no immediate queue fallback, even after a definite rejection.
 
 Each Codex input includes the unchanged message envelope plus separate generated
 mailbox bindings: its physical home and explicit `read_thread_argv`, `ack_argv`
-and `reply_argv`. These argv arrays select the adapter's Python interpreter and
-installed `inbox_axi` module with `--home` and `--json`; the existing native TUI
+and `reply_argv`. These argv arrays select the adapter's Node executable and
+installed compiled `dist/cli.js` with `--home` and `--json`; the existing native TUI
 does not need inherited `INBOX_AXI_HOME` or an `inbox-axi` executable on `PATH`.
-Keep that Python installation available while the native context uses its argv.
+Keep that npm installation available while the native context uses its argv.
 Execute the arrays directly, without a shell. Before acting, replying or acking,
 read the thread, repeat with `--after NEXT_CURSOR` until `next_cursor` is null,
 and restore any generic associated task context from the returned metadata.
 The reply argv uses the exact thread and parent IDs and reads explicit reply text
 from stdin. Replies never ack or automatically forward assistant transcripts.
 
-Before a Codex mutating RPC, a durable delivery block is stored. A definitive
-JSON-RPC rejection clears it; a matching successful response clears it but does
+Before a Codex mutating RPC, a durable delivery block is stored. A well-formed
+JSON-RPC rejection (integer code, string message, no simultaneous result) clears it;
+arbitrary native error messages/data are replaced with sanitized inbox-facing diagnostics.
+Malformed error envelopes retain uncertainty. A matching successful response clears it but does
 **not** ack. Timeout, disconnect, malformed response or crash leaves uncertainty
 blocked across restarts and consumer/adapter changes. `status` counts blocked pending items. Inspect
 `delivery-state MESSAGE_ID`; reconcile in the native UI, then either explicitly
