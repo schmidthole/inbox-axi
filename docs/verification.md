@@ -8,6 +8,9 @@ auto-ack, transformed Pi input and handled-input/all-vs-partial explicit ack,
 missing-progress deadline/shutdown recovery, repeated Pi steering during one
 continuing busy run, and Codex local
 WebSocket RPC identity/queue/steer/rejection/timeout/uncertainty/approval fixtures,
+Codex delivered read-thread/reply/ack argv against a custom mailbox (source and
+isolated installed wheel), shared uncertainty gating across consumer changes
+and due retries,
 Pi lifecycle/user-message API fixture, and official MCP SDK stdio Claude tools/
 normal direct-entry channel notifications, explicit ack/reply, periodic polling,
 consumer exclusion, shutdown/restart and simulated active-conversation replacement.

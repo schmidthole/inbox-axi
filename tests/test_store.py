@@ -170,6 +170,47 @@ class StoreTests(unittest.TestCase):
             self.store.ack(message["id"])
         self.assertEqual(len(second.poll(now=1)), 8)
 
+    def test_delivery_blocks_survive_consumer_switch_without_stopping_input(self):
+        blocked = [self.store.post() for _ in range(12)]
+        for message in blocked:
+            self.store.block_delivery(message["id"], "codex", "uncertain")
+        stop = self.store.post(text="stop")
+        consumer = Consumer(self.store)
+        self.assertEqual(consumer.poll(now=0), [stop])
+        consumer.close()
+        reopened = Store(self.root)
+        self.addCleanup(reopened.close)
+        replacement = Consumer(reopened)
+        self.addCleanup(replacement.close)
+        self.assertEqual(replacement.poll(now=0), [stop])
+        self.assertEqual(reopened.status()["blocked_deliveries"], 12)
+        self.assertEqual(reopened.status()["pending"], 13)
+        reopened.retry(blocked[0]["id"])
+        self.assertEqual(replacement.poll(now=1), [blocked[0]])
+        self.assertIsNone(reopened.delivery_block(blocked[0]["id"]))
+        reopened.ack(blocked[1]["id"])
+        self.assertEqual(replacement.poll(now=2), [])
+        self.assertEqual(reopened.status()["blocked_deliveries"], 10)
+        self.assertEqual(reopened.status()["pending"], 12)
+
+    def test_delivery_block_excludes_due_retries_and_preserves_fairness(self):
+        initial = [self.store.post() for _ in range(8)]
+        consumer = Consumer(self.store)
+        self.addCleanup(consumer.close)
+        self.assertEqual(consumer.poll(now=0), initial)
+        for message in initial[:4]:
+            self.store.block_delivery(message["id"], "codex", "uncertain")
+        new = [self.store.post() for _ in range(8)]
+        self.assertEqual(consumer.poll(now=30), initial[4:] + new[:4])
+        self.assertEqual(consumer.poll(now=31), new[4:])
+        for message in initial[:4]:
+            self.assertIsNotNone(self.store.delivery_block(message["id"]))
+        self.assertEqual(self.store.status()["pending"], 16)
+        self.store.retry(initial[0]["id"])
+        self.store.ack(initial[1]["id"])
+        self.assertEqual(consumer.poll(now=32), [initial[0]])
+        self.assertEqual(self.store.status()["blocked_deliveries"], 2)
+
     def test_private_paths(self):
         self.assertEqual(self.root.stat().st_mode & 0o777, 0o700)
         self.assertEqual((self.root / "inbox.sqlite3").stat().st_mode & 0o777, 0o600)

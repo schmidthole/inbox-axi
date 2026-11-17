@@ -2,6 +2,8 @@
 
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -146,6 +148,66 @@ class CodexTests(unittest.TestCase):
         self.assertFalse(
             any(call["method"] == "thread/queue/add" for call in self.calls)
         )
+
+    def test_delivered_mailbox_commands_restore_history_reply_and_ack(self):
+        first = self.store.post(text="first", metadata={"task": "generic-task"})
+        message = first
+        for _ in range(21):
+            message = self.store.post(
+                thread_id=first["thread_id"], parent_id=message["id"], text="next"
+            )
+        deliver(self.store, self.rpc, THREAD, "fixture", message)
+        text = self.calls[-1]["params"]["input"][0]["text"]
+        binding = json.loads(text.split("\n", 1)[1])
+        self.assertEqual(binding["message"], message)
+        mailbox = binding["mailbox"]
+        self.assertEqual(mailbox["home"], str(self.root))
+        self.assertIn("before acting, replying or acknowledging", text)
+        self.assertIn("until next_cursor is null", text)
+        self.assertIn("generic associated task context", text)
+        self.assertIn("never automatically forward assistant transcripts", text)
+        env = dict(os.environ)
+        env.pop("INBOX_AXI_HOME", None)
+        env["PATH"] = ""
+        env["HOME"] = str(self.base / "unused-home")
+        env["XDG_STATE_HOME"] = str(self.base / "unused-state")
+        # source tests select candidate code; wheel coverage needs no pythonpath.
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+
+        def run(argv, body=None):
+            self.assertEqual(argv[:3], [sys.executable, "-m", "inbox_axi"])
+            result = subprocess.run(
+                argv,
+                input=body,
+                text=True,
+                capture_output=True,
+                cwd=str(self.base),
+                env=env,
+                timeout=15,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)
+
+        argv = mailbox["read_thread_argv"]
+        page = run(argv)
+        self.assertEqual(page["metadata"], {"task": "generic-task"})
+        history = page["messages"]
+        self.assertIsNotNone(page["next_cursor"])
+        while page["next_cursor"] is not None:
+            page = run([*argv, "--after", str(page["next_cursor"])])
+            history.extend(page["messages"])
+        self.assertEqual(len(history), 22)
+        self.assertEqual(history[0], first)
+        self.assertEqual(history[-1], message)
+        reply = run(mailbox["reply_argv"], "explicit reply")
+        self.assertEqual(reply["thread_id"], message["thread_id"])
+        self.assertEqual(reply["parent_id"], message["id"])
+        self.assertEqual(reply["direction"], "outbound")
+        self.assertEqual(self.store.status()["pending"], 22)
+        self.assertTrue(run(mailbox["ack_argv"])["incorporated"])
+        self.assertEqual(self.store.status()["pending"], 21)
+        self.assertFalse(Path(env["XDG_STATE_HOME"]).exists())
+        self.assertFalse((Path(env["HOME"]) / ".local/state/inbox-axi").exists())
 
     def test_uncertain_persisted_and_explicit_retry(self):
         message = self.store.post()
