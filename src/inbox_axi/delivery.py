@@ -68,6 +68,7 @@ class Consumer:
                 select m.*, 0 as attempts from messages m
                 left join consumer_offers o on o.message_id=m.id
                 where m.direction='inbound' and m.acked_at is null and o.message_id is null
+                and not exists (select 1 from delivery_blocks b where b.message_id=m.id)
                 order by m.seq limit 8
             """
             ).fetchall()
@@ -76,6 +77,7 @@ class Consumer:
                 select m.*, o.attempts from consumer_offers o
                 join messages m on m.id=o.message_id
                 where m.acked_at is null and o.due<=?
+                and not exists (select 1 from delivery_blocks b where b.message_id=m.id)
                 order by o.due, m.seq limit ?
             """,
                 (now, 8 - min(4, len(new))),

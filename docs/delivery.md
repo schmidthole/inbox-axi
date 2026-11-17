@@ -23,6 +23,13 @@ one small record per offered pending message, not a growing in-memory batch or
 native queue. Acked records are excluded and removed on the next poll. Only bounded
 query pages/batches are loaded into Python memory. The table disappears on consumer
 shutdown/crash; restart can immediately redeliver stable message IDs in FIFO order.
+Durable uncertainty blocks are excluded from both new offers and due retries by
+this shared consumer, including manual consume and Pi/Claude after switching from
+Codex. Blocked messages stay pending; they do not occupy batch slots or prevent
+unrelated input (including stop instructions) from being offered. Explicit `retry`
+removes the block, making the message eligible under the current retry schedule;
+restarting the consumer resets that schedule. Explicit `ack` removes the message
+from pending delivery. Neither recovery action is automatic.
 Deduplicate IDs in working context. There is no exactly-once claim, fixed delivery
 latency under unlimited incoming traffic, or real-time scheduling guarantee.
 
@@ -106,10 +113,22 @@ permission requests are not answered by this adapter. No `thread/resume`,
 Read/steer races fail visibly and can be relaunched after resolving native state;
 there is no immediate queue fallback, even after a definite rejection.
 
+Each Codex input includes the unchanged message envelope plus separate generated
+mailbox bindings: its physical home and explicit `read_thread_argv`, `ack_argv`
+and `reply_argv`. These argv arrays select the adapter's Python interpreter and
+installed `inbox_axi` module with `--home` and `--json`; the existing native TUI
+does not need inherited `INBOX_AXI_HOME` or an `inbox-axi` executable on `PATH`.
+Keep that Python installation available while the native context uses its argv.
+Execute the arrays directly, without a shell. Before acting, replying or acking,
+read the thread, repeat with `--after NEXT_CURSOR` until `next_cursor` is null,
+and restore any generic associated task context from the returned metadata.
+The reply argv uses the exact thread and parent IDs and reads explicit reply text
+from stdin. Replies never ack or automatically forward assistant transcripts.
+
 Before a Codex mutating RPC, a durable delivery block is stored. A definitive
 JSON-RPC rejection clears it; a matching successful response clears it but does
 **not** ack. Timeout, disconnect, malformed response or crash leaves uncertainty
-blocked across restarts. `status` counts blocked pending items. Inspect
+blocked across restarts and consumer/adapter changes. `status` counts blocked pending items. Inspect
 `delivery-state MESSAGE_ID`; reconcile in the native UI, then either explicitly
 `ack MESSAGE_ID` if incorporated, or `retry MESSAGE_ID` to authorize resubmission
 and relaunch the adapter. Retry can duplicate an already-applied request; it is

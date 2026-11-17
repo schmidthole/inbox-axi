@@ -18,6 +18,9 @@ env.pop("PYTHONPATH", None)
 env["PIP_CACHE_DIR"] = str(scratch / "pip-cache")
 with tempfile.TemporaryDirectory(dir=str(scratch)) as temp:
     temp = Path(temp)
+    env.pop("INBOX_AXI_HOME", None)
+    env["HOME"] = str(temp / "unused-home")
+    env["XDG_STATE_HOME"] = str(temp / "unused-state")
     subprocess.run(
         [
             sys.executable,
@@ -82,8 +85,53 @@ with tempfile.TemporaryDirectory(dir=str(scratch)) as temp:
     assert "--session-id" not in claude["launch"]
     assert "INBOX_AXI_SESSION" not in claude["mcp_config"]["mcpServers"]["inbox"]["env"]
     assert Path(claude["mcp_config"]["mcpServers"]["inbox"]["args"][0]).is_file()
-    cli(["ack", first["id"]])
+    result = subprocess.run(
+        [
+            str(python),
+            "-c",
+            "import sys; from inbox_axi.store import Store; "
+            "from inbox_axi.adapters.codex import delivery_input; "
+            "store = Store(sys.argv[1]); "
+            "print(delivery_input(store, store.message(sys.argv[2]))); store.close()",
+            str(home),
+            first["id"],
+        ],
+        check=True,
+        text=True,
+        capture_output=True,
+        env=env,
+        cwd=str(temp),
+        timeout=15,
+    )
+    delivery = json.loads(result.stdout.split("\n", 1)[1])
+    assert delivery["message"] == first
+    assert delivery["mailbox"]["home"] == str(home)
+    native_env = {**env, "PATH": ""}
+
+    def delivered(name, body=None):
+        argv = delivery["mailbox"][name + "_argv"]
+        assert argv[:3] == [str(python), "-m", "inbox_axi"]
+        result = subprocess.run(
+            argv,
+            input=body,
+            text=True,
+            capture_output=True,
+            env=native_env,
+            cwd=str(temp),
+            timeout=15,
+        )
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    assert delivered("read_thread")["messages"] == [first]
+    reply = delivered("reply", "installed explicit reply")
+    assert reply["thread_id"] == first["thread_id"]
+    assert reply["parent_id"] == first["id"]
+    assert cli(["status"])["pending"] == 1
+    assert delivered("ack")["incorporated"] is True
     assert cli(["status"])["pending"] == 0
+    assert not Path(env["XDG_STATE_HOME"]).exists()
+    assert not (Path(env["HOME"]) / ".local/state/inbox-axi").exists()
     result = subprocess.run(
         [
             str(python),
