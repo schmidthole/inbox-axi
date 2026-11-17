@@ -3,14 +3,16 @@ import { spawnSync } from "node:child_process";
 import { performance } from "node:perf_hooks";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import extension from "../src/inbox_axi/adapters/pi.ts";
+import { join, resolve } from "node:path";
+import extension from "../../dist/adapters/pi.js";
 
 const home = realpathSync(mkdtempSync(join(tmpdir(), "inbox-pi-")));
 const root = join(home, "mailbox");
-const python = process.env.INBOX_AXI_PYTHON || "python3";
+const node = process.execPath;
+const cliPath = resolve("dist/cli.js");
 process.env.INBOX_AXI_HOME = root;
-process.env.INBOX_AXI_PYTHON = python;
+process.env.INBOX_AXI_NODE = node;
+process.env.INBOX_AXI_CLI = cliPath;
 const events = new Map();
 const messages = [];
 const errors = [];
@@ -62,8 +64,8 @@ const ctx = {
 };
 function cli(args, input) {
   const result = spawnSync(
-    python,
-    ["-m", "inbox_axi", "--home", root, "--json", ...args],
+    node,
+    [cliPath, args[0], "--home", root, "--json", ...args.slice(1)],
     { input, encoding: "utf8" },
   );
   assert.equal(result.status, 0, result.stderr);
@@ -145,7 +147,7 @@ try {
   assert.equal(messages.length, 2);
   cli(["ack", second.id]);
   const payload = JSON.parse(
-    messages[1].text.slice(messages[1].text.indexOf('{"binding"')),
+    messages[1].text.slice(messages[1].text.indexOf("\n") + 1),
   );
   observe("rewritten instructions\n" + JSON.stringify(payload, null, 2));
   await until(() => messages.length === 3);

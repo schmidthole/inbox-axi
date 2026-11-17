@@ -3,7 +3,17 @@
 Every persisted message is an immutable envelope:
 
 ```json
-{"version":1,"id":"msg_32_lowercase_hex","thread_id":"thr_32_lowercase_hex","seq":1,"parent_id":null,"direction":"inbound","text":"request","data":{"arbitrary":"json"},"created_at":1760000000.0}
+{
+  "version": 1,
+  "id": "msg_32_lowercase_hex",
+  "thread_id": "thr_32_lowercase_hex",
+  "seq": 1,
+  "parent_id": null,
+  "direction": "inbound",
+  "text": "request",
+  "data": { "arbitrary": "json" },
+  "created_at": 1760000000.0
+}
 ```
 
 IDs are opaque server UUID4-derived identifiers. `seq` is a global mailbox SQLite
@@ -38,20 +48,24 @@ Choose stable keys for external retries and replies.
   `next_cursor` is the last returned sequence only if another matching row exists.
   Use the same thread/pending selector when continuing. There are no snapshots
   across pages; new messages may appear, and ack can change pending membership.
+- Integer JSON tokens retain exact arbitrary integer precision (SQLite cursors remain signed 64-bit). Fractional/exponent tokens use finite IEEE754 values, including underflow to zero; arbitrary decimal precision is not promised.
 - JSON numbers must be finite; duplicate keys, malformed JSON, unknown request
   fields, invalid references, bool-as-integer selectors and out-of-range pages fail.
-- Expected CLI failures exit 2 with lowercase stderr diagnostics; stdout on success
-  is either compact human output or explicit JSON. `consume`/`codex` emit JSON lines.
+- Structured errors use stdout in TOON (or JSON with `--json`): usage errors exit 2,
+  operational failures exit 1, successful no-ops exit 0. Ordinary default output is
+  official TOON; machine JSON retains full message data. `consume`/`codex` emit JSON lines.
+- Lists include matching total counts independent of cursor/page size, including definitive zero.
+  Detail previews include truncation markers, total lengths and `--full` hints only when needed.
+  `--fields` selects explicit message fields; `--json` always keeps full envelopes.
 
 Use `inbox-axi --help` and `inbox-axi COMMAND --help` for exact options. Supported
 commands: init, post, reply, read-thread, pending, ack, ack-status, status, consume,
-delivery-state, retry, codex, setup, doctor, uninstall.
+delivery-state, retry, codex, setup, doctor, uninstall, capture.
 
 `pending` is unacknowledged **inbound** input only, not all unfinished work.
 Read-thread contains both directions forever. `ack MESSAGE_ID` is idempotent,
 records explicit incorporation, never deletes history or marks a task complete.
 Replies do not ack. There is no auto-forwarding of assistant output.
-
 
 `ack-status MESSAGE_ID [MESSAGE_ID ...]` reads incorporation flags for 1..8
 explicit inbound message IDs. It never acknowledges input or returns body content.

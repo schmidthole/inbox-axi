@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -10,31 +10,32 @@ import {
 
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
+import { canonical, parseJson } from "../codec.js";
+import { VERSION } from "../version.js";
+import { cliBinding, batchFrame } from "./runtime.js";
+import type { JsonValue } from "../types.js";
 
 export async function serveInbox() {
   const home = process.env.INBOX_AXI_HOME;
-  const python = process.env.INBOX_AXI_PYTHON;
+
   const launchId = randomUUID();
-  if (!home || !python) {
-    process.stderr.write(
-      "inbox requires inbox_axi_home and inbox_axi_python; see setup claude\n",
-    );
+  if (!home) {
+    process.stderr.write("inbox requires inbox_axi_home; see setup claude\n");
     process.exit(2);
   }
-  let consumer;
+  const binding = cliBinding(home);
+  let consumer: ChildProcessWithoutNullStreams | undefined;
   let stopping = false;
-  const tools = new Set();
-  function cli(args, input) {
+  const tools = new Set<ChildProcessWithoutNullStreams>();
+  function cli(args: string[], input?: string): Promise<JsonValue> {
     return new Promise((resolve, reject) => {
       if (tools.size >= 4) {
         reject(new Error("too many mailbox tool calls"));
         return;
       }
-      const child = spawn(
-        python,
-        ["-m", "inbox_axi", "--home", home, "--json", ...args],
-        { stdio: ["pipe", "pipe", "pipe"] },
-      );
+      const child = spawn(binding.node, binding.argv(args[0]!, args.slice(1)), {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
       tools.add(child);
       const timer = setTimeout(() => child.kill("SIGKILL"), 15000);
       let output = "";
@@ -60,7 +61,7 @@ export async function serveInbox() {
           return;
         }
         try {
-          resolve(JSON.parse(output));
+          resolve(parseJson(output));
         } catch {
           reject(new Error("invalid mailbox response"));
         }
@@ -69,7 +70,7 @@ export async function serveInbox() {
     });
   }
   const mcp = new Server(
-    { name: "inbox", version: "0.1.0" },
+    { name: "inbox", version: VERSION },
     {
       capabilities: {
         tools: {},
@@ -119,8 +120,8 @@ export async function serveInbox() {
       if (request.params.name === "ack") {
         if (
           Object.keys(args).length !== 1 ||
-          !/^msg_[0-9a-f]{32}$/.test(args.message_id) ||
-          typeof args.message_id !== "string"
+          typeof args.message_id !== "string" ||
+          !/^msg_[0-9a-f]{32}$/.test(args.message_id)
         )
           throw new Error("ack requires an explicit message_id");
         value = await cli(["ack", args.message_id]);
@@ -143,9 +144,9 @@ export async function serveInbox() {
         ]);
         if (Object.keys(args).some((key) => !allowed.has(key)))
           throw new Error("unknown reply field");
-        value = await cli(["reply", "--input-json", "-"], JSON.stringify(args));
+        value = await cli(["reply", "--input-json", "-"], canonical(args));
       } else throw new Error("unknown inbox tool");
-      return { content: [{ type: "text", text: JSON.stringify(value) }] };
+      return { content: [{ type: "text", text: canonical(value) }] };
     } catch (error) {
       return {
         content: [{ type: "text", text: String(error).toLowerCase() }],
@@ -157,24 +158,25 @@ export async function serveInbox() {
     if (stopping) return;
     stopping = true;
     for (const child of tools) child.kill("SIGKILL");
-    if (consumer) {
-      consumer.stdout?.destroy();
-      consumer.stderr?.destroy();
-      if (consumer.exitCode === null && consumer.signalCode === null) {
-        await new Promise((resolve) => {
-          const timer = setTimeout(() => consumer.kill("SIGKILL"), 2000);
-          consumer.once("close", () => {
+    const current = consumer;
+    if (current) {
+      current.stdout?.destroy();
+      current.stderr?.destroy();
+      if (current.exitCode === null && current.signalCode === null) {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(() => current.kill("SIGKILL"), 2000);
+          current.once("close", () => {
             clearTimeout(timer);
             resolve();
           });
-          consumer.stdin?.end();
-          consumer.kill("SIGTERM");
+          current.stdin?.end();
+          current.kill("SIGTERM");
         });
       }
     }
     await mcp.close();
   }
-  function fail(error) {
+  function fail(error: unknown) {
     process.stderr.write(
       "inbox channel inactive: " +
         String(error).slice(0, 1000).toLowerCase() +
@@ -188,11 +190,9 @@ export async function serveInbox() {
       fail("duplicate mcp initialization");
       return;
     }
-    consumer = spawn(
-      python,
-      ["-m", "inbox_axi", "--home", home, "consume", "--parent-pipe"],
-      { stdio: ["pipe", "pipe", "pipe"] },
-    );
+    consumer = spawn(binding.node, binding.argv("consume", ["--parent-pipe"]), {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     consumer.on("error", fail);
     consumer.stderr.on("data", (data) =>
       process.stderr.write(String(data).slice(0, 1000).toLowerCase()),
@@ -204,8 +204,8 @@ export async function serveInbox() {
       const lines = createInterface({ input: consumer.stdout });
       for await (const line of lines) {
         if (stopping) break;
-        const batch = JSON.parse(line);
-        if (batch.event === "ready") {
+        const batch = batchFrame(line);
+        if ("event" in batch) {
           process.stderr.write(
             "inbox consumer ready; routing=active_conversation; native channel registration and receipt unconfirmed; check native channel notice, /mcp, consent, auth and org policy\n",
           );
@@ -218,7 +218,7 @@ export async function serveInbox() {
         )
           throw new Error("invalid inbox batch");
         for (const message of batch.messages) {
-          let timer;
+          let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             await Promise.race([
               mcp.notification({
@@ -226,18 +226,12 @@ export async function serveInbox() {
                 params: {
                   content:
                     "before acting or replying in this active conversation, restore thread history and any generic associated task context; page read-thread until next_cursor is null. cli argv: " +
-                    JSON.stringify([
-                      python,
-                      "-m",
-                      "inbox_axi",
-                      "--home",
-                      home,
-                      "--json",
-                      "read-thread",
-                      message.thread_id,
+                    canonical([
+                      binding.node,
+                      ...binding.argv("read-thread", [message.thread_id]),
                     ]) +
                     "\n" +
-                    JSON.stringify(message),
+                    canonical(message),
                   meta: {
                     message_id: message.id,
                     thread_id: message.thread_id,
@@ -262,6 +256,8 @@ export async function serveInbox() {
           }
         }
       }
+      if (!stopping)
+        throw new Error("consumer output closed; pending messages retained");
     })().catch(fail);
   };
   mcp.onerror = (error) =>

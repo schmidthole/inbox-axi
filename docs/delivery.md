@@ -21,7 +21,7 @@ Per-message redelivery waits 30, 60, 120, 240, then at most 300 seconds. Schedul
 metadata lives in a connection-private, file-backed SQLite temporary table, with
 one small record per offered pending message, not a growing in-memory batch or
 native queue. Acked records are excluded and removed on the next poll. Only bounded
-query pages/batches are loaded into Python memory. The table disappears on consumer
+query pages/batches are loaded into JavaScript memory. The table disappears on consumer
 shutdown/crash; restart can immediately redeliver stable message IDs in FIFO order.
 Durable uncertainty blocks are excluded from both new offers and due retries by
 this shared consumer, including manual consume and Pi/Claude after switching from
@@ -115,10 +115,10 @@ there is no immediate queue fallback, even after a definite rejection.
 
 Each Codex input includes the unchanged message envelope plus separate generated
 mailbox bindings: its physical home and explicit `read_thread_argv`, `ack_argv`
-and `reply_argv`. These argv arrays select the adapter's Python interpreter and
-installed `inbox_axi` module with `--home` and `--json`; the existing native TUI
+and `reply_argv`. These argv arrays select the adapter's Node executable and
+installed compiled `dist/cli.js` with `--home` and `--json`; the existing native TUI
 does not need inherited `INBOX_AXI_HOME` or an `inbox-axi` executable on `PATH`.
-Keep that Python installation available while the native context uses its argv.
+Keep that npm installation available while the native context uses its argv.
 Execute the arrays directly, without a shell. Before acting, replying or acking,
 read the thread, repeat with `--after NEXT_CURSOR` until `next_cursor` is null,
 and restore any generic associated task context from the returned metadata.

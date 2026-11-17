@@ -3,13 +3,14 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Client } from "../src/inbox_axi/adapters/node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js";
-import { StdioClientTransport } from "../src/inbox_axi/adapters/node_modules/@modelcontextprotocol/sdk/dist/esm/client/stdio.js";
-import { z } from "../src/inbox_axi/adapters/node_modules/zod/index.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { z } from "zod";
 
 const home = realpathSync(mkdtempSync(join(tmpdir(), "inbox-claude-")));
 const root = join(home, "mailbox");
-const python = process.env.INBOX_AXI_PYTHON || "python3";
+const node = process.execPath;
+const cliPath = resolve("dist/cli.js");
 const clients = [];
 // this receiver label simulates replacement context, not a native lifecycle signal.
 let activeConversation = "initial-fixture-conversation";
@@ -23,8 +24,13 @@ const notificationSchema = z.object({
 function launch() {
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [resolve("src/inbox_axi/adapters/claude.mjs")],
-    env: { ...process.env, INBOX_AXI_HOME: root, INBOX_AXI_PYTHON: python },
+    args: [resolve("dist/adapters/claude.js")],
+    env: {
+      ...process.env,
+      INBOX_AXI_HOME: root,
+      INBOX_AXI_NODE: node,
+      INBOX_AXI_CLI: cliPath,
+    },
     stderr: "pipe",
   });
   const client = new Client(
@@ -52,8 +58,8 @@ function launch() {
 }
 function cli(args, input) {
   const result = spawnSync(
-    python,
-    ["-m", "inbox_axi", "--home", root, "--json", ...args],
+    node,
+    [cliPath, args[0], "--home", root, "--json", ...args.slice(1)],
     { input, encoding: "utf8" },
   );
   assert.equal(result.status, 0, result.stderr);
@@ -69,13 +75,12 @@ async function until(test) {
 function restoreThread(notice) {
   const argv = JSON.parse(notice.instructions.split("cli argv: ")[1]);
   assert.deepEqual(argv, [
-    python,
-    "-m",
-    "inbox_axi",
+    node,
+    cliPath,
+    "read-thread",
     "--home",
     root,
     "--json",
-    "read-thread",
     notice.meta.thread_id,
   ]);
   const result = spawnSync(argv[0], argv.slice(1), { encoding: "utf8" });

@@ -1,27 +1,16 @@
-PYTHON ?= .venv/bin/python
-NODE ?= node
-ASSETS = src/inbox_axi/adapters
-export PYTHONPATH := src
-export PIP_CACHE_DIR := $(CURDIR)/.scratch/pip-cache
-export INBOX_AXI_PYTHON := $(shell $(PYTHON) -c 'import sys; print(sys.executable)')
-
-.PHONY: format test lint check test-install
+.PHONY: build format test lint check test-install
+build:
+	npm run build
 format:
-	$(PYTHON) -m black src tests tools examples
-	npm run format --prefix $(ASSETS)
-
-test:
-	$(PYTHON) -m unittest discover -s tests -v
-	$(NODE) tests/pi_fixture.mjs
-	$(NODE) tests/claude_fixture.mjs
-
+	npm run format
+	npm run skill
 lint:
-	$(PYTHON) -m black --check src tests tools examples
-	npm run check --prefix $(ASSETS)
-	$(PYTHON) tools/check.py
+	npm run build
+	npm run format:check
+	npm run skill:check
 	git diff --check
-
-test-install:
-	$(PYTHON) tests/check_install.py
-
+test:
+	npm test
+test-install: build
+	node --import tsx --test test/package/*.test.ts
 check: lint test test-install

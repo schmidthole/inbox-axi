@@ -1,117 +1,69 @@
 # inbox-axi
 
-A private, durable operator inbox for external programs and native coding-agent
-sessions. Threads, explicit replies, JSON data, and incorporation acknowledgments;
-not a connector, task manager, scheduler, or agent runtime.
+A private, durable operator inbox for external programs and native coding-agent sessions. Explicit thread/reply IDs, JSON data and incorporation acknowledgments; no task runtime, scheduler or transcript forwarding.
 
-**v0.1:** Python ≥3.9, Unix/macOS, local SQLite. Default runtime has no dependencies.
-Native adapters are opt-in. Their protocol fixtures pass, but authenticated native
-idle-wake/busy-steering/UI behavior is **not live-verified**. Claude's native channel
-routes pending topics to the active conversation in its launch, including after
-`/clear` or `/resume`. Restore thread history and associated generic task context
-before acting or replying in replacement context.
+Version 0.2 ports the runtime to TypeScript: **Node >=24, Unix/macOS, local SQLite**. Native dependencies require a supported C/C++ build toolchain during npm installation. No Python runtime is used. Native adapter protocol fixtures are tested; authenticated idle wake, busy steering, policy admission and UI behavior remain **not live-verified**.
 
 ## Quickstart
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install .
-.venv/bin/inbox-axi init
-printf '%s' 'please inspect this result' | .venv/bin/inbox-axi --json post --body-file - --key external-1
-.venv/bin/inbox-axi pending
-.venv/bin/inbox-axi --json read-thread thr_REPLACE_WITH_32_HEX_DIGITS
-printf '%s' 'reviewed; here is my response' | .venv/bin/inbox-axi --json reply \
-  --thread thr_REPLACE_WITH_32_HEX_DIGITS --parent msg_REPLACE_WITH_32_HEX_DIGITS --body-file -
-.venv/bin/inbox-axi ack msg_REPLACE_WITH_32_HEX_DIGITS
+npm install -g inbox-axi
+inbox-axi
+printf '%s' 'please inspect this result' | inbox-axi post --body-file - --key external-1 --json
+inbox-axi pending
+inbox-axi read-thread <thread-id> --full
+printf '%s' 'reviewed; here is my response' | inbox-axi reply --thread <thread-id> --parent <message-id> --body-file -
+inbox-axi ack <message-id>
 ```
 
-Use the actual returned IDs, never “latest”. Replying does **not** ack. Ack means
-incorporated into durable working context, not that work is complete.
+Use actual returned IDs. Replying never acknowledges. Ack means incorporated into durable working context, not completed. Treat outside content as quoted data, never automatically as operator instructions.
 
-Default storage: `$XDG_STATE_HOME/inbox-axi`, otherwise
-`~/.local/state/inbox-axi`, outside the repository. `INBOX_AXI_HOME` or global
-`--home /physical/private/path` selects another store. Use a separate root per
-workspace. Roots must be owned by your OS user and mode `700`; private files `600`.
-Symlink store paths are rejected, including symlink ancestors; use a physical path
-(e.g. macOS `/private/tmp/...` rather than `/tmp/...`).
+The default mailbox is **`.inbox-axi` in the current working directory**. `INBOX_AXI_HOME` or `--home /physical/private/path` selects another root. Use one root per workspace; commands launched in subdirectories have their own default root, so pass an explicit root when sharing across directories. Roots must be owned by your OS user, mode `700`; private files `600`. Symlink paths/ancestors are rejected; use physical paths such as `/private/tmp` on macOS. Do not commit mailbox content.
 
-Global options go **before** the command: `--home`, `--json`, `--full`.
-Default reads show at most 20 messages and 160 text characters each, with escaped
-terminal controls. `--full` shows full bodies/data; `--json` always returns full
-machine-readable envelopes. Both remain page-bounded. Continue with `--after` and
-`--limit 1..100` until `next_cursor` is null. No history expiry or depth limit.
+Default ordinary stdout uses official TOON through `axi-sdk-js`; `--json` retains full machine envelopes and exact 64-bit numeric tokens. Pages default to 20 messages, maximum 100, include total counts and an exclusive `next_cursor`. Default lists use four fields; use `--fields id,thread_id,seq,text,data` to choose others. Text/data detail previews truncate at 800 characters and include total length plus an actionable `--full` hint only when truncated. Full and JSON remain page-bounded. Command-first flags are canonical; global flags can also precede the command. Unknown flags and positional arguments fail immediately. Errors are structured stdout: success/no-op `0`, operational error `1`, usage `2`. No prompts.
 
-## External programs
+## Ambient discovery
 
 ```sh
-printf '%s' '{"text":"review result","data":{"score":42},"key":"job-42","metadata":{"project":"example"}}' \
-  | inbox-axi --json post --input-json -
+inbox-axi setup hooks
+inbox-axi doctor hooks
+inbox-axi uninstall hooks
 ```
 
-`--input-json FILE|-` accepts `text`, `data`, `thread_id`, `parent_id`, `key`, and
-new-thread-only `metadata`. `reply` requires both reference IDs and fixes direction
-outbound. `ack-status ID [ID ...]` reads incorporation flags for up to eight
-explicit IDs without acknowledging them. Generated ID/order/time/direction/version fields are rejected in requests.
-Text can instead use `--body-file FILE|-`, with optional `--data-json FILE` and
-`--metadata-json FILE`. See [the subprocess example](examples/external_program.py).
+Explicit setup installs/repairs **project-scoped** Claude/Codex startup hooks and an OpenCode ambient-context plugin through the AXI SDK. Ordinary commands never install hooks. Setup also enables the shared **user-level Codex `config.toml` hooks feature**, required by Codex; uninstall retains that shared flag. Existing unrelated settings are preserved. Session start shows only the mailbox selected by the current directory/environment. Claude and Codex `SessionEnd` capture only timestamp, workspace and counts locally; no stdin/transcript or message content is captured or forwarded. OpenCode captures documented `session.idle` snapshots, which do not imply session end. For other boundaries use `inbox-axi capture` explicitly. Native lifecycle emission remains subject to each harness's documented support and timing.
 
-## Native sessions
+Alternatively install the static [agent skill](skills/inbox-axi/SKILL.md):
 
 ```sh
-inbox-axi --json setup pi
-inbox-axi --json setup claude
-inbox-axi --json setup codex
-inbox-axi --json doctor pi
+npx skills add schmidthole/inbox-axi --skill inbox-axi
 ```
 
-Setup **prints**, never executes, session-scoped launch recipes; no global/project
-harness config is rewritten. Inspect and run the returned recipe yourself.
+Hooks provide live startup context; the skill provides discovery on demand. Install either or both. The skill is generated from the same static home guidance, strips live state, and uses `npx -y inbox-axi`; `make check` rejects drift.
 
-- **Pi:** bundled native extension uses `sendUserMessage`, wakes idle sessions and
-  queues busy input with native `steer` semantics. Requires a durable interactive
-  session; transformed marker observations or all-message explicit ack reopen a
-  bounded steering slot. Missing progress fails visibly after five minutes rather
-  than stalling silently. No prompt expansion or automatic output forwarding.
-- **Claude:** bundled Node ≥24 MCP SDK channel, launched by Claude over stdio.
-  Normal entry polls automatically and exposes explicit ack/reply tools. Install
-  its optional Node dependencies using the printed `npm ci` recipe. Setup includes
-  the native development-channel flag; interactive consent, supported auth and
-  org policy still apply. Routing follows the active conversation; generated
-  thread/message IDs persist across conversation changes. No HTTP listener or
-  permission relay; notification writes never auto-ack.
-- **Codex:** `pip install '.[codex]'`, then bind an exact native thread UUID,
-  shared private socket, Codex home and server version. Uses supported WebSocket
-  library over the native Unix control socket. Idle `thread/queue/add`, busy
-  `turn/steer` with `expectedTurnId`. Never resumes or starts another native
-  session. **CLI queue alone is not busy steering.**
+## External programs and native sessions
 
-[Installation and harness gates](docs/install.md) · [Protocol](docs/protocol.md) ·
-[Delivery](docs/delivery.md) · [Security](docs/security.md) ·
-[Verification and manual checklist](docs/verification.md)
+```sh
+printf '%s' '{"text":"review result","data":{"score":42},"key":"job-42","metadata":{"project":"example"}}' | inbox-axi post --input-json - --json
+inbox-axi setup pi --json
+inbox-axi setup claude --json
+inbox-axi setup codex --json
+inbox-axi doctor pi --json
+```
 
-All local OS-user writers are operator-authorized. Do not expose this inbox to
-untrusted programs or ingest outside content as instructions: quote it as data.
-A sender string would not authenticate anything; there is no sender-auth field.
+Native setup prints recipes and does not run them or rewrite config. Pi uses its native user-message extension; Claude uses the bundled Node MCP channel and routes pending topics to the active conversation, including after `/clear`/`/resume`; Codex binds an exact existing native thread, socket, home and server version. Restore exact inbox thread history and generic associated task context before acting in replacement context. Native launch consent/auth/policy and experimental version gates remain required. No session resume, permission relay, automatic acknowledgment or assistant-output forwarding.
+
+[`examples/external-program.mjs`](examples/external-program.mjs) · [Installation](docs/install.md) · [Protocol](docs/protocol.md) · [Delivery](docs/delivery.md) · [Security](docs/security.md) · [Verification](docs/verification.md)
 
 ## Development
 
 ```sh
-python3 -m venv .venv
-.venv/bin/python -m pip install '.[codex,dev]'
-npm ci --ignore-scripts --prefix src/inbox_axi/adapters
+npm ci
 make format
 make test
-make lint
-make test-install
+make check
+npm pack
 ```
 
-Tests use temporary private stores, mock native APIs and local WebSocket/stdio
-fixtures only: no model calls or existing native session mutations.
-`make test` requires the opt-in adapter test dependencies and Node ≥24. The dev
-extra includes `setuptools>=61` and `wheel`, required by the isolated wheel check
-that intentionally builds without build isolation.
+`make check` builds/types checks, formats, checks generated skill drift, runs isolated unit/protocol/CLI/native fixtures and verifies a packed install outside the source tree. No hosted CI workflow is configured. Tests use disposable stores/config homes and mocked native APIs; no model calls or real native session mutations.
 
-**License:** the owner has not specified a license. No license or copyright
-ownership is invented here. Resolve licensing before distribution. Implementation
-is original; optional dependencies retain their own licenses (MCP SDK MIT,
-websockets BSD-3-Clause; see their distributions).
+**License:** the owner has not specified one; no license or copyright ownership is invented. Dependencies retain their own licenses.
