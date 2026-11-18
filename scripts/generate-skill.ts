@@ -14,14 +14,17 @@ description: >-
 
 ${DESCRIPTION}.
 
-Install the \`inbox-axi\` command from the git repository. It is not published to the npm registry, so \`npm install -g inbox-axi\` and \`npx inbox-axi\` do not work.
+Install the \`inbox-axi\` command from a checkout of the git repository. It is not published to the npm registry.
+\`npm install -g inbox-axi\`, \`npx inbox-axi\`, and \`npm install -g git+https://github.com/schmidthole/inbox-axi.git\` do not work.
 Node >=24, python3, make, and a C++ compiler are required because \`fs-ext\` builds a native addon.
 
 \`\`\`sh
-npm install -g git+https://github.com/schmidthole/inbox-axi.git
+git clone https://github.com/schmidthole/inbox-axi.git
+cd inbox-axi
+npm ci
+npm run build
+npm install -g .
 \`\`\`
-
-A checkout works too: \`npm ci\`, \`npm run build\`, then \`npm install -g .\`
 
 ${GUIDANCE.map((line) => "- " + line).join("\n")}
 

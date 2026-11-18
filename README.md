@@ -6,13 +6,7 @@ Version 0.2 ports the runtime to TypeScript: **Node >=24, Unix/macOS, local SQLi
 
 ## Quickstart
 
-This package is not published to the npm registry. Install it from the git repository:
-
-```sh
-npm install -g git+https://github.com/schmidthole/inbox-axi.git
-```
-
-Or from a checkout, after installing the toolchain above:
+This package is not published to the npm registry. Install it from a checkout, after installing the toolchain above:
 
 ```sh
 git clone https://github.com/schmidthole/inbox-axi.git
@@ -22,7 +16,7 @@ npm run build
 npm install -g .
 ```
 
-`npm install -g inbox-axi` and `npx inbox-axi` do not resolve a release. See [Installation](docs/install.md).
+`npm install -g inbox-axi`, `npx inbox-axi`, and `npm install -g git+https://github.com/schmidthole/inbox-axi.git` do not produce a working install. See [Installation](docs/install.md).
 
 ```sh
 inbox-axi

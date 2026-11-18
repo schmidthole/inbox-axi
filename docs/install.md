@@ -1,18 +1,8 @@
 # Installation and native gates
 
-inbox-axi is installed from this repository. It is not published to the npm registry, so `npm install -g inbox-axi` and `npx inbox-axi` do not work.
+inbox-axi is installed from a checkout of this repository. It is not published to the npm registry. `npm install -g inbox-axi`, `npx inbox-axi`, and `npm install -g git+https://github.com/schmidthole/inbox-axi.git` do not work. npm runs a global git install's dependency step with the global flag still set, so the build cannot see a local toolchain.
 
 Use Node >=24 on Unix/macOS. The mailbox uses local SQLite and `flock`. `fs-ext` compiles a native addon during installation, which needs python3, make, and a C++ compiler (`g++`, or the Xcode command-line tools on macOS). No Python runtime is used after that build, and there is no separate adapter install.
-
-Git URL install, from any directory:
-
-```sh
-npm install -g git+https://github.com/schmidthole/inbox-axi.git
-```
-
-That runs `prepare`, which builds `dist` before the package is installed. A global git install runs `prepare` before dependencies exist, so it downloads the pinned TypeScript compiler and emits `dist` without a local toolchain. A packed tarball already contains `dist` and does not build again.
-
-Checkout install:
 
 ```sh
 git clone https://github.com/schmidthole/inbox-axi.git
@@ -22,7 +12,7 @@ npm run build
 npm install -g .
 ```
 
-`npm ci` installs the locked dependencies, including the native addon. `npm run build` emits `dist`. `npm install -g .` installs this checkout. Update by pulling the same repository and installing again. `npm pack` builds a local tarball for the install check; it does not publish.
+`npm ci` installs the locked dependencies, including the native addon. `npm run build` emits `dist`. `prepare` runs that same build when dependencies are already installed, and does not run the skill check. `npm install -g .` installs this checkout. A packed tarball already contains `dist` and does not build again. Update by pulling the same repository and installing again. `npm pack` builds a local tarball for the install check; it does not publish. `dist/` is not committed.
 
 `inbox-axi -v`, `-V`, `--version` return bare `0.2.0` before importing the command graph. SDK `update --check` reports registry state; `update` follows the detected installation method. Neither runs during ordinary commands. There is no npm registry release for that update command to install.
 
