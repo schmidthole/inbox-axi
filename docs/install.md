@@ -10,7 +10,7 @@ Git URL install, from any directory:
 npm install -g git+https://github.com/schmidthole/inbox-axi.git
 ```
 
-That runs `prepare`, which builds `dist` and checks the generated skill before the package is installed. A packed registry-style tarball does not run the build again.
+That runs `prepare`, which builds `dist` before the package is installed. A global git install runs `prepare` before dependencies exist, so it downloads the pinned TypeScript compiler and emits `dist` without a local toolchain. A packed tarball already contains `dist` and does not build again.
 
 Checkout install:
 
@@ -44,6 +44,6 @@ The complementary generated [skill](../skills/inbox-axi/SKILL.md) provides stati
 
 - Pi: launch the bundled `dist/adapters/pi.js` with `pi -e`; interactive durable session and native user-message API required. Generation fencing, transformed-input markers, explicit all-message incorporation and bounded progress deadlines remain enforced.
 - Claude: launch the bundled `dist/adapters/claude.js` as a stdio MCP channel using the printed config plus native development-channel flag. Interactive MCP/channel consent, supported authentication and organization policy are required. Routing follows the active conversation; clear/resume requires restoring exact inbox history and task context. Transport writes do not prove registration or receipt.
-- Codex: supply exact `--socket`, `--codex-home`, `--server-version`, `--thread` from an already-loaded native shared server thread. Uses WebSocket over the selected private Unix socket, idle queue versus busy `turn/steer` with `expectedTurnId`. No alternate backend or session resume. A confirmed submission is recorded and is not offered again until explicit `retry`. Reconcile uncertain mutations with `delivery-state`, then explicit `ack` or `retry`.
+- Codex: supply exact `--socket`, `--codex-home`, `--server-version`, `--thread` from an already-loaded native shared server thread. Uses WebSocket over the selected private Unix socket, idle queue versus busy `turn/steer` with `expectedTurnId`. No alternate backend or session resume. A confirmed submission is recorded and is not offered again until explicit `ack` or `retry`. Reconcile uncertain mutations with `delivery-state`, then explicit `ack` or `retry`.
 
 Recipes set `INBOX_AXI_HOME`, `INBOX_AXI_NODE` and `INBOX_AXI_CLI` to known mailbox/executable/compiled CLI paths. `~` and `~/...` in `--home` expand to the current user's home before that path is recorded. Delivered tool argv uses explicit Node and compiled CLI with command-first `--home`/`--json`, so the receiving native session does not need a matching PATH or inherited environment. Keep this installation available while its argv remains in context.

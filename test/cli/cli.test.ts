@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { decode } from "@toon-format/toon";
+import { Store } from "../../src/store.js";
 const BIN = resolve("bin/inbox-axi.js");
 function fixture() {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "inbox-cli-"));
@@ -104,8 +105,34 @@ test("dashboard, definitive zero, minimal schema, fields, totals and pagination"
     );
     assert.equal(outbound.direction, "outbound");
     assert.equal(json(f, ["status"]).pending, 1);
-    assert.equal(json(f, ["delivery-state", first.id]).block, null);
+    const ackedState = json(f, ["delivery-state", first.id]);
+    assert.equal(ackedState.block, null);
+    assert.equal(ackedState.submission, null);
     assert.ok(json(f, ["retry", first.id]));
+    const pendingId = next.messages[0].id;
+    let state = json(f, ["delivery-state", pendingId]);
+    assert.equal(state.block, null);
+    assert.equal(state.submission, null);
+    const recorded = new Store(f.home);
+    recorded.recordSubmission(pendingId, "codex", "thread/queue/add");
+    recorded.blockDelivery(pendingId, "codex", "uncertain");
+    recorded.close();
+    state = json(f, ["delivery-state", pendingId]);
+    assert.equal(state.block.reason, "uncertain");
+    assert.equal(state.submission.method, "thread/queue/add");
+    assert.equal(json(f, ["retry", pendingId]).retry_authorized, true);
+    state = json(f, ["delivery-state", pendingId]);
+    assert.equal(state.block, null);
+    assert.equal(state.submission, null);
+    const again = new Store(f.home);
+    again.recordSubmission(pendingId, "codex", "turn/steer");
+    again.blockDelivery(pendingId, "codex", "uncertain");
+    again.close();
+    assert.equal(json(f, ["ack", pendingId]).incorporated, true);
+    state = json(f, ["delivery-state", pendingId]);
+    assert.equal(state.block, null);
+    assert.equal(state.submission, null);
+    assert.equal(json(f, ["status"]).pending, 0);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

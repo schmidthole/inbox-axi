@@ -362,11 +362,16 @@ export class Store {
     const message = this.message(id);
     if (message.direction !== "inbound")
       validation("only inbound messages can be acknowledged");
-    this.run(
-      "update messages set acked_at=coalesce(acked_at,?) where id=?",
-      Date.now() / 1000,
-      id,
-    );
+    const ackedAt = Date.now() / 1000;
+    this.transaction(() => {
+      this.run(
+        "update messages set acked_at=coalesce(acked_at,?) where id=?",
+        ackedAt,
+        id,
+      );
+      this.run("delete from delivery_blocks where message_id=?", id);
+      this.run("delete from delivery_submissions where message_id=?", id);
+    });
     return { id, incorporated: true };
   }
   ackStatus(ids: string[]) {

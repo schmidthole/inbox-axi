@@ -453,6 +453,26 @@ test("decimal and exponent idempotency roundtrips through the CLI", (t) => {
     }).id,
   );
 });
+test("ack clears a confirmed submission and any uncertainty block", (t) => {
+  const { store } = fixture(t);
+  const message = store.post();
+  store.recordSubmission(message.id, "codex", "thread/queue/add");
+  store.blockDelivery(message.id, "codex", "uncertain");
+  assert.equal(store.submission(message.id)?.method, "thread/queue/add");
+  assert.equal(store.deliveryBlock(message.id)?.reason, "uncertain");
+  assert.deepEqual(store.ack(message.id), {
+    id: message.id,
+    incorporated: true,
+  });
+  assert.equal(store.submission(message.id), null);
+  assert.equal(store.deliveryBlock(message.id), null);
+  assert.deepEqual(store.ack(message.id), {
+    id: message.id,
+    incorporated: true,
+  });
+  assert.equal(store.status().pending, 0);
+  assert.equal(store.status().blocked_deliveries, 0);
+});
 test("confirmed submission stays pending and is excluded from later offers", (t) => {
   const { store, root } = fixture(t);
   const message = store.post({ text: "keep" });

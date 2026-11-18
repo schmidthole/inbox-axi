@@ -40,7 +40,7 @@ messages stay pending; they do not occupy batch slots or prevent unrelated input
 (including stop instructions) from being offered. Explicit `retry` removes the
 block and any confirmed submission, making the message eligible again; restarting
 the consumer resets the backoff schedule. Explicit `ack` removes the message from
-pending delivery. Neither recovery action is automatic. Deduplicate IDs in working
+pending delivery and clears any uncertainty block or confirmed submission. Neither recovery action is automatic. Deduplicate IDs in working
 context. There is no exactly-once claim, fixed delivery latency under unlimited
 incoming traffic, or real-time scheduling guarantee.
 
