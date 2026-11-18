@@ -34,7 +34,16 @@ test("generated skill is derived from static guidance and rejects drift", () => 
     SOURCE,
   );
   const skill = readFileSync("skills/inbox-axi/SKILL.md", "utf8");
-  assert.match(skill, /npx -y inbox-axi/);
+  assert.match(skill, /npm ci/);
+  assert.match(skill, /npm run build/);
+  assert.match(skill, /npm install -g \./);
+  assert.match(skill, /not published to the npm registry/);
+  assert.match(
+    skill,
+    /npm install -g git\+https:\/\/github.com\/schmidthole\/inbox-axi\.git` do not work/,
+  );
+  assert.doesNotMatch(skill, /npx -y inbox-axi/);
+  assert.match(skill, /^- inbox-axi pending:/m);
   assert.ok(!/messages\[|previous_session|consumer_active/.test(skill));
 });
 test(
@@ -74,7 +83,8 @@ test(
         "npm",
         [
           "install",
-          "--offline",
+          // npm ci does not store registry packuments, so --offline fails on a cold cache.
+          "--prefer-offline",
           "--no-audit",
           "--no-fund",
           "--prefix",

@@ -1,5 +1,5 @@
 import { parseTree, type Node, type ParseError } from "jsonc-parser";
-import { validation } from "./errors.js";
+import { InboxError, validation } from "./errors.js";
 import type { JsonValue, Sequence } from "./types.js";
 
 function unicode(value: string): void {
@@ -137,7 +137,8 @@ export function parseJson(text: string): JsonValue {
       return node.value as JsonValue;
     }
     return convert(tree, 0);
-  } catch {
+  } catch (error) {
+    if (error instanceof InboxError) throw error;
     return validation(
       "invalid json text; use unique object keys, finite numbers and valid utf-8",
     );

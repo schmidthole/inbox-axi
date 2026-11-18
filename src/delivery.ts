@@ -70,13 +70,15 @@ export class Consumer {
       this.store.db.exec(
         "delete from consumer_offers where exists (select 1 from messages m where m.id=consumer_offers.message_id and m.acked_at is not null)",
       );
+      const withheld =
+        "not exists(select 1 from delivery_blocks b where b.message_id=m.id) and not exists(select 1 from delivery_submissions s where s.message_id=m.id)";
       const fresh = this.store
         .all(`select m.*,0 as attempts from messages m left join consumer_offers o on o.message_id=m.id
         where m.direction='inbound' and m.acked_at is null and o.message_id is null
-        and not exists(select 1 from delivery_blocks b where b.message_id=m.id) order by m.seq limit 8`);
+        and ${withheld} order by m.seq limit 8`);
       const retries = this.store.all(
         `select m.*,o.attempts from consumer_offers o join messages m on m.id=o.message_id
-        where m.acked_at is null and o.due<=? and not exists(select 1 from delivery_blocks b where b.message_id=m.id)
+        where m.acked_at is null and o.due<=? and ${withheld}
         order by o.due,m.seq limit ?`,
         now,
         8 - Math.min(4, fresh.length),

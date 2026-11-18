@@ -6,12 +6,12 @@ import {
   lstatSync,
   mkdirSync,
 } from "node:fs";
-import { homedir } from "node:os";
-import { resolve, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { InboxError, validation } from "./errors.js";
 import { bounded, canonical, identifier, integer, parseJson } from "./codec.js";
+import { expandHome } from "./paths.js";
 import type {
   Message,
   Page,
@@ -65,9 +65,7 @@ export function privateFile(path: string, create = true): void {
 export function privateRoot(input: string): string {
   if (typeof input !== "string" || input.length === 0)
     validation("store path must be text");
-  const root = resolve(
-    input.startsWith("~/") ? join(homedir(), input.slice(2)) : input,
-  );
+  const root = expandHome(input);
   const ancestors: string[] = [];
   for (let part = root; ; part = dirname(part)) {
     ancestors.unshift(part);
@@ -139,6 +137,7 @@ export class Store {
         create index if not exists pending_order on messages(direction,acked_at,seq);
         create table if not exists requests (key text primary key,payload text not null,message_id text not null references messages(id));
         create table if not exists delivery_blocks (message_id text primary key references messages(id),target text not null,reason text not null);
+        create table if not exists delivery_submissions (message_id text primary key references messages(id),target text not null,method text not null,submitted_at real not null);
         pragma user_version=1; commit;`);
     } catch (e) {
       try {
@@ -363,11 +362,16 @@ export class Store {
     const message = this.message(id);
     if (message.direction !== "inbound")
       validation("only inbound messages can be acknowledged");
-    this.run(
-      "update messages set acked_at=coalesce(acked_at,?) where id=?",
-      Date.now() / 1000,
-      id,
-    );
+    const ackedAt = Date.now() / 1000;
+    this.transaction(() => {
+      this.run(
+        "update messages set acked_at=coalesce(acked_at,?) where id=?",
+        ackedAt,
+        id,
+      );
+      this.run("delete from delivery_blocks where message_id=?", id);
+      this.run("delete from delivery_submissions where message_id=?", id);
+    });
     return { id, incorporated: true };
   }
   ackStatus(ids: string[]) {
@@ -409,9 +413,47 @@ export class Store {
       }) ?? null
     );
   }
+  submission(id: string): {
+    message_id: string;
+    target: string;
+    method: string;
+    submitted_at: number;
+  } | null {
+    this.message(id);
+    return (
+      (this.get(
+        "select * from delivery_submissions where message_id=?",
+        id,
+      ) as {
+        message_id: string;
+        target: string;
+        method: string;
+        submitted_at: number;
+      }) ?? null
+    );
+  }
+  recordSubmission(id: string, target: string, method: string): void {
+    this.message(id);
+    bounded(target, 4096, "target");
+    bounded(method, 128, "method");
+    const submittedAt = Date.now() / 1000;
+    this.transaction(() => {
+      this.run(
+        "insert or replace into delivery_submissions (message_id,target,method,submitted_at) values (?,?,?,?)",
+        id,
+        target,
+        method,
+        submittedAt,
+      );
+      this.run("delete from delivery_blocks where message_id=?", id);
+    });
+  }
   retry(id: string) {
     this.message(id);
-    this.run("delete from delivery_blocks where message_id=?", id);
+    this.transaction(() => {
+      this.run("delete from delivery_blocks where message_id=?", id);
+      this.run("delete from delivery_submissions where message_id=?", id);
+    });
     return { id, retry_authorized: true };
   }
   status() {

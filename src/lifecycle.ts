@@ -7,6 +7,7 @@ import {
   chmodSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { expandHome } from "./paths.js";
 import {
   installSessionStartHooks,
   sessionStartHookStatus,
@@ -145,11 +146,12 @@ export function manageHooks(
     ...options(),
     onError: (message: string) => errors.push(message),
   };
+  const selected = home === undefined ? undefined : expandHome(home);
   if (action === "setup") {
     mkdirSync(join(process.cwd(), ".inbox-axi-hooks"), { recursive: true });
     const node = shellQuote(process.execPath);
     const bin = shellQuote(resolve(process.argv[1]));
-    const text = `#!/bin/sh\n# inbox-axi managed session launcher\nexec ${node} ${bin} "$@"${home ? ` --home ${shellQuote(resolve(home))}` : ""}\n`;
+    const text = `#!/bin/sh\n# inbox-axi managed session launcher\nexec ${node} ${bin} "$@"${selected ? ` --home ${shellQuote(selected)}` : ""}\n`;
     writeManaged(wrapperPath(), text, "inbox-axi managed session launcher");
     chmodSync(wrapperPath(), 0o700);
     installSessionStartHooks(opts);
@@ -180,7 +182,7 @@ export function manageHooks(
     hooks: sessionStartHookStatus(opts),
     capture: "claude/codex SessionEnd; opencode session.idle snapshot",
     scope: "current project",
-    home: home ?? "current directory or INBOX_AXI_HOME",
+    home: selected ?? "current directory or INBOX_AXI_HOME",
     codex_feature:
       "setup enables shared user config.toml hooks feature; uninstall retains it",
   };

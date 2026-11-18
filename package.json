@@ -12,6 +12,7 @@
   "files": [
     "bin",
     "dist",
+    "scripts/prepare.mjs",
     "skills",
     "README.md",
     "docs",
@@ -24,7 +25,8 @@
     "test": "node --import tsx --test test/core/*.test.ts test/adapters/*.test.ts test/cli/*.test.ts",
     "skill": "node --import tsx scripts/generate-skill.ts",
     "skill:check": "node --import tsx scripts/generate-skill.ts --check",
-    "prepack": "npm run build && npm run skill:check",
+    "prepare": "node scripts/prepare.mjs",
+    "prepack": "node scripts/prepare.mjs",
     "pretest": "npm run build"
   },
   "dependencies": {

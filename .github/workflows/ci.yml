@@ -1,0 +1,30 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install the C++ toolchain fs-ext needs
+        run: sudo apt-get update && sudo apt-get install -y build-essential python3
+      - run: npm ci
+      - run: make check
+      - name: Global checkout install into a clean prefix and cache
+        run: |
+          set -euo pipefail
+          prefix="${RUNNER_TEMP}/inbox-prefix"
+          cache="${RUNNER_TEMP}/inbox-npm-cache"
+          npm install -g --prefix "$prefix" --cache "$cache" .
+          test "$("$prefix/bin/inbox-axi" --version)" = "0.2.0"
+          "$prefix/bin/inbox-axi" --home "${RUNNER_TEMP}/mailbox" post --body-file - --json <<<'installed'

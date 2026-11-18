@@ -402,6 +402,7 @@ async function execute(command: string, args: Args): Promise<unknown> {
         return {
           id: args.positionals[0],
           block: store.deliveryBlock(args.positionals[0]),
+          submission: store.submission(args.positionals[0]),
         };
       case "retry":
         return store.retry(args.positionals[0]);

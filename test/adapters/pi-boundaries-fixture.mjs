@@ -71,7 +71,7 @@ try {
       errors.some((message) =>
         mode === "eof"
           ? message.includes("output closed")
-          : message.includes("unique object keys"),
+          : message.includes("duplicate json object key"),
       ),
     );
     const pid = Number(readFileSync(process.env.INBOX_FIXTURE_PID, "utf8"));

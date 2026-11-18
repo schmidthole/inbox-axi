@@ -238,7 +238,7 @@ try {
   await until(() => !cli(["status"]).consumer_active);
   assert.deepEqual(cli(["pending"]).messages, [pending]);
   console.log(
-    "claude direct-entry channel fixture passed; conversation replacement simulated, native admission/live delivery unverified",
+    "claude direct-entry channel fixture passed; conversation replacement simulated",
   );
 } finally {
   for (const client of clients) await client.close();
