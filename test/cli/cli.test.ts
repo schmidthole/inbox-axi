@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   mkdtempSync,
   mkdirSync,
+  existsSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -370,6 +371,42 @@ test("workspace hooks opt in, repair, scope, capture and uninstall preserve unre
       readFileSync(join(f.user, ".codex", "config.toml"), "utf8"),
       /hooks = true/,
     );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+test("tilde homes expand for recipes, hook launchers and the mailbox", () => {
+  const f = fixture();
+  try {
+    assert.equal(
+      json(f, ["setup", "pi", "--home", "~"]).environment.INBOX_AXI_HOME,
+      f.user,
+    );
+    assert.equal(
+      json(f, ["setup", "codex", "--home", "~/mailbox"]).environment
+        .INBOX_AXI_HOME,
+      join(f.user, "mailbox"),
+    );
+    assert.equal(
+      json(f, ["setup", "claude", "--home", "~mailbox"]).environment
+        .INBOX_AXI_HOME,
+      join(f.workspace, "~mailbox"),
+    );
+    const posted = json(
+      f,
+      ["post", "--home", "~/mailbox", "--body-file", "-"],
+      "tilde",
+    );
+    assert.equal(posted.text, "tilde");
+    assert.equal(existsSync(join(f.user, "mailbox", "inbox.sqlite3")), true);
+    assert.equal(existsSync(join(f.workspace, "~")), false);
+    json(f, ["setup", "hooks", "--home", "~/mailbox"]);
+    const launcher = readFileSync(
+      join(f.workspace, ".inbox-axi-hooks", "inbox-axi"),
+      "utf8",
+    );
+    assert.ok(launcher.includes(join(f.user, "mailbox")));
+    assert.equal(launcher.includes("/~/"), false);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

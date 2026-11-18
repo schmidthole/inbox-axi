@@ -2,11 +2,13 @@ import { fileURLToPath } from "node:url";
 import { isAbsolute } from "node:path";
 import { parseJson } from "../codec.js";
 import { InboxError } from "../errors.js";
+import { expandHome } from "../paths.js";
 import type { Message } from "../types.js";
 
 export function cliBinding(home: string | undefined) {
-  if (!home || !isAbsolute(home))
+  if (!home || (!isAbsolute(home) && home !== "~" && !home.startsWith("~/")))
     throw new InboxError("inbox requires an absolute inbox_axi_home");
+  home = expandHome(home);
   const node = process.env.INBOX_AXI_NODE || process.execPath;
   const cli =
     process.env.INBOX_AXI_CLI ||

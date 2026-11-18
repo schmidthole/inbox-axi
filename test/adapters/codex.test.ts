@@ -2,8 +2,14 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
-import { chmodSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import {
+  chmodSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import {
@@ -16,7 +22,7 @@ import {
 } from "../../dist/adapters/codex.js";
 import { Store } from "../../src/store.js";
 import { canonical, parseJson } from "../../src/codec.js";
-import { active } from "../../src/delivery.js";
+import { active, Consumer } from "../../src/delivery.js";
 import { batchFrame, cliBinding } from "../../dist/adapters/runtime.js";
 
 const thread = "019a7d37-3067-7000-8000-000000000001";
@@ -139,6 +145,20 @@ test("codex idle queue and active steer preserve ids and never acknowledge", asy
     "thread/queue/add",
   );
   const first = f.calls.at(-1)!.params;
+  assert.equal(f.store.deliveryBlock(message.id), null);
+  assert.equal(f.store.submission(message.id)?.method, "thread/queue/add");
+  assert.equal(f.store.status().pending, 1);
+  assert.equal(
+    f.store.ackStatus([message.id]).acknowledgments[0].incorporated,
+    false,
+  );
+  const submittedCalls = f.calls.length;
+  await assert.rejects(
+    deliver(f.store, f.rpc, thread, "fixture", message),
+    /already submitted/,
+  );
+  assert.equal(f.calls.length, submittedCalls);
+  f.store.retry(message.id);
   f.state.mode = "active";
   assert.equal(
     (await deliver(f.store, f.rpc, thread, "fixture", message)).method,
@@ -149,6 +169,11 @@ test("codex idle queue and active steer preserve ids and never acknowledge", asy
   assert.equal(second.expectedTurnId, turn);
   assert.deepEqual(f.store.page({ pending: true }).messages, [message]);
   assert.equal(f.store.deliveryBlock(message.id), null);
+  assert.equal(f.store.submission(message.id)?.method, "turn/steer");
+  assert.equal(
+    f.store.ackStatus([message.id]).acknowledgments[0].incorporated,
+    false,
+  );
   assert.ok(
     !f.calls.some((call) =>
       ["thread/resume", "turn/start"].includes(call.method),
@@ -166,8 +191,33 @@ test("codex definite rejection clears block without fallback or acknowledgment",
     RpcError,
   );
   assert.equal(f.store.deliveryBlock(message.id), null);
+  assert.equal(f.store.submission(message.id), null);
   assert.ok(!f.calls.some((call) => call.method === "thread/queue/add"));
   assert.equal(f.store.status().pending, 1);
+});
+
+test("codex definite rejection stays eligible on the backoff schedule", async (t) => {
+  const f = await fixture(t);
+  f.state.reject = true;
+  const message = f.store.post({});
+  const consumer = new Consumer(f.store);
+  t.after(() => consumer.close());
+  assert.deepEqual(
+    consumer.poll(0).map((item) => item.id),
+    [message.id],
+  );
+  await assert.rejects(
+    deliver(f.store, f.rpc, thread, "fixture", message),
+    RpcError,
+  );
+  assert.equal(f.store.submission(message.id), null);
+  assert.equal(f.store.deliveryBlock(message.id), null);
+  assert.equal(f.store.status().pending, 1);
+  assert.deepEqual(consumer.poll(29), []);
+  assert.deepEqual(
+    consumer.poll(30).map((item) => item.id),
+    [message.id],
+  );
 });
 
 for (const failure of ["malformed", "disconnect"] as const) {
@@ -188,6 +238,7 @@ for (const failure of ["malformed", "disconnect"] as const) {
     const reopened = new Store(f.store.root);
     try {
       assert.ok(reopened.deliveryBlock(message.id));
+      assert.equal(reopened.submission(message.id), null);
       assert.equal(reopened.status().blocked_deliveries, 1);
       reopened.retry(message.id);
     } finally {
@@ -296,15 +347,31 @@ test("adapter frame codec retains full 64-bit sequences and rejects corrupt fram
   assert.ok("messages" in frame);
   if ("messages" in frame)
     assert.equal(frame.messages[0]!.seq, 9223372036854775807n);
-  assert.throws(
-    () => batchFrame('{"version":1,"version":1,"messages":[]}'),
-    /unique|duplicate/,
-  );
+  assert.throws(() => batchFrame('{"version":1,"version":1,"messages":[]}'), {
+    message: "duplicate json object key",
+  });
   assert.throws(
     () => batchFrame('{"version":1,"messages":[{"id":"spoof"}]}'),
     /invalid/,
   );
   assert.throws(() => cliBinding("relative"), /absolute/);
+  assert.throws(() => cliBinding("~mailbox"), /absolute/);
+  assert.equal(
+    cliBinding("~/mailbox").argv("pending")[3],
+    join(homedir(), "mailbox"),
+  );
+  assert.equal(cliBinding("~").argv("status")[3], resolve(homedir()));
+});
+
+test("codex home uses shared normalization and resolves the server path", async (t) => {
+  const f = await fixture(t);
+  const link = join(f.home, "home-link");
+  symlinkSync(f.home, link);
+  await f.rpc.initialize(link, "0.169.0");
+  await assert.rejects(
+    f.rpc.initialize(join(f.home, "missing"), "0.169.0"),
+    /mismatch/,
+  );
 });
 
 const malformedErrors: Array<[string, Record<string, unknown>]> = [
@@ -350,6 +417,7 @@ for (const [name, response] of malformedErrors) {
     const reopened = new Store(f.store.root);
     try {
       assert.ok(reopened.deliveryBlock(message.id));
+      assert.equal(reopened.submission(message.id), null);
       assert.equal(reopened.status().pending, 1);
       await assert.rejects(
         deliver(reopened, f.rpc, thread, "fixture", message),
@@ -461,6 +529,7 @@ for (const [name, response] of malformedErrors) {
     const reopened = new Store(f.store.root);
     try {
       assert.ok(reopened.deliveryBlock(message.id));
+      assert.equal(reopened.submission(message.id), null);
       assert.equal(reopened.status().pending, 1);
     } finally {
       reopened.close();

@@ -301,10 +301,7 @@ export default function (pi: ExtensionAPI) {
       try {
         const batch = batchFrame(line);
         if ("event" in batch) {
-          ctx.ui.setStatus(
-            "inbox-axi",
-            "inbox active; native delivery not live-verified",
-          );
+          ctx.ui.setStatus("inbox-axi", "inbox active");
           return;
         }
         if (

@@ -1,6 +1,5 @@
 import { realpathSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { homedir } from "node:os";
+import { dirname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import WebSocket from "ws";
 import { canonical, parseJson } from "../codec.js";
@@ -10,6 +9,7 @@ import { Store } from "../store.js";
 import { Consumer } from "../delivery.js";
 import type { Message } from "../types.js";
 import { cliBinding, object } from "./runtime.js";
+import { expandHome } from "../paths.js";
 
 export class RpcError extends InboxError {}
 interface Caller {
@@ -210,7 +210,7 @@ export class RPC implements Caller {
       throw new InboxError(
         "codex server version mismatch; recheck capabilities before rebinding",
       );
-    if (result.codexHome !== expandHome(home))
+    if (result.codexHome !== expandHome(home, { realpath: true }))
       throw new InboxError("codex home mismatch; refusing another backend");
     await new Promise<void>((accept, reject) =>
       this.ws.send(canonical({ method: "initialized", params: {} }), (error) =>
@@ -220,20 +220,6 @@ export class RPC implements Caller {
       ),
     );
     return result;
-  }
-}
-function expandHome(path: string) {
-  const absolute = resolve(
-    path === "~"
-      ? homedir()
-      : path.startsWith("~/")
-        ? homedir() + path.slice(1)
-        : path,
-  );
-  try {
-    return realpathSync(absolute);
-  } catch {
-    return absolute;
   }
 }
 
@@ -324,6 +310,12 @@ export async function deliver(
   target: string,
   message: Message,
 ) {
+  if (store.submission(message.id))
+    throw new InboxError(
+      "message " +
+        message.id +
+        " was already submitted; inspect delivery-state; ack incorporates it and retry authorizes another submission",
+    );
   if (store.deliveryBlock(message.id))
     throw new InboxError(
       "delivery blocked for " +
@@ -363,7 +355,7 @@ export async function deliver(
     throw new InboxError(
       "unsupported codex submission response; delivery remains uncertain",
     );
-  store.retry(message.id);
+  store.recordSubmission(message.id, target, method);
   return {
     id: message.id,
     state: "submitted_not_acknowledged",
@@ -429,14 +421,12 @@ export async function run(
     await threadState(rpc, args.thread);
     const binding = {
       socket: realpathSync(args.socket),
-      home: expandHome(args.codexHome),
+      home: expandHome(args.codexHome, { realpath: true }),
       version: args.serverVersion,
       thread: args.thread,
     };
     const target = canonical(binding);
-    if (
-      !(await write({ event: "ready", target: binding, live_verified: false }))
-    )
+    if (!(await write({ event: "ready", target: binding })))
       return discardedOutput;
     while (!controller.signal.aborted) {
       for (const message of consumer.poll()) {

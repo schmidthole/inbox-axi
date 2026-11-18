@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { defaultRoot } from "./store.js";
+import { expandHome } from "./paths.js";
 import { canonical } from "./codec.js";
 import { InboxError } from "./errors.js";
 import { manageHooks, shellQuote } from "./lifecycle.js";
@@ -16,7 +17,7 @@ export function management(
   if (command === "uninstall" && !harness)
     return {
       instructions:
-        "stop the native adapter and relaunch without its extension/channel flags; npm uninstall -g inbox-axi; run inbox-axi uninstall hooks first if installed; mailbox retained",
+        "stop the native adapter and relaunch without its extension/channel flags; npm uninstall -g inbox-axi removes a checkout or git-url install; run inbox-axi uninstall hooks first if installed; mailbox retained",
     };
   if (!harness || !["pi", "claude", "codex"].includes(harness))
     throw new InboxError(
@@ -24,7 +25,7 @@ export function management(
       "VALIDATION_ERROR",
       [`inbox-axi ${command} hooks`, `inbox-axi ${command} pi`],
     );
-  const root = resolve(home ?? defaultRoot());
+  const root = expandHome(home ?? defaultRoot());
   const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
   const environment = {
     INBOX_AXI_HOME: root,
@@ -51,7 +52,7 @@ export function management(
       configured: "session-scoped; not inferred",
       capability_verified: false,
       limitations:
-        "offline availability only; native auth, idle wake, busy steering and admission require manual verification",
+        "offline availability only; this command does not check native auth, idle wake, busy steering or admission",
     };
   }
   const common = {
@@ -69,7 +70,7 @@ export function management(
           .join(" ") +
         ` pi -e ${shellQuote(fileURLToPath(new URL("./adapters/pi.js", import.meta.url)))}`,
       requirements:
-        "durable interactive native pi user-message api; explicit incorporation; native live behavior unverified",
+        "durable interactive native pi user-message api; explicit incorporation",
     };
   if (harness === "claude") {
     const config = {
@@ -92,13 +93,13 @@ export function management(
       automatic_push_enabled: true,
       channel_registration: "unknown",
       requirements:
-        "interactive channel/mcp consent, supported authentication and organization policy; restore thread history and generic task context after clear/resume; native registration unverified",
+        "interactive channel/mcp consent, supported authentication and organization policy; restore thread history and generic task context after clear/resume",
     };
   }
   return {
     ...common,
     launch_template: `${shellQuote(process.execPath)} ${shellQuote(cli)} codex --home ${shellQuote(root)} --socket <shared-private-socket> --codex-home <exact-server-home> --server-version <exact-version> --thread <native-thread-uuid>`,
     requirements:
-      "exact native thread sharing selected private server; no resume or backend fallback; explicit retry after uncertain submission; native behavior unverified",
+      "exact native thread sharing selected private server; no resume or backend fallback; explicit retry after uncertain submission",
   };
 }

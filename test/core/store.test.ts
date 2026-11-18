@@ -206,7 +206,18 @@ test("bounded nesting and finite IEEE754 float parsing", (t) => {
     "9007199254740993.125",
   ])
     assert.equal(canonical(parseJson(text)), JSON.stringify(Number(text)));
-  assert.throws(() => parseJson('{"x":1,"x":1}'), InboxError);
+  assert.throws(() => parseJson('{"x":1,"x":1}'), {
+    message: "duplicate json object key",
+  });
+  assert.throws(() => parseJson("[".repeat(1001) + "1" + "]".repeat(1001)), {
+    message: "json nesting is too deep",
+  });
+  assert.throws(() => parseJson('"\\ud800"'), {
+    message: "text must be valid utf-8",
+  });
+  assert.throws(() => parseJson("1e999"), {
+    message: "nonfinite json number",
+  });
 });
 test("workspace scoped defaults and explicit root override", (t) => {
   const original = process.env.INBOX_AXI_HOME;
@@ -441,4 +452,55 @@ test("decimal and exponent idempotency roundtrips through the CLI", (t) => {
       key: "new-float",
     }).id,
   );
+});
+test("confirmed submission stays pending and is excluded from later offers", (t) => {
+  const { store, root } = fixture(t);
+  const message = store.post({ text: "keep" });
+  const consumer = new Consumer(store);
+  try {
+    assert.deepEqual(consumer.poll(0), [message]);
+    store.blockDelivery(
+      message.id,
+      "codex",
+      "submission in progress or uncertain: thread/queue/add",
+    );
+    assert.deepEqual(consumer.poll(30), []);
+    store.recordSubmission(message.id, "codex", "thread/queue/add");
+    assert.equal(store.deliveryBlock(message.id), null);
+    assert.equal(store.submission(message.id)?.method, "thread/queue/add");
+    assert.equal(store.status().pending, 1);
+    assert.equal(store.status().blocked_deliveries, 0);
+    assert.equal(
+      store.ackStatus([message.id]).acknowledgments[0].incorporated,
+      false,
+    );
+    assert.deepEqual(consumer.poll(30), []);
+    assert.deepEqual(consumer.poll(1000), []);
+    const reply = store.post({
+      direction: "outbound",
+      thread_id: message.thread_id,
+      parent_id: message.id,
+      text: "reply",
+    });
+    assert.equal(reply.parent_id, message.id);
+    assert.equal(
+      store.ackStatus([message.id]).acknowledgments[0].incorporated,
+      false,
+    );
+  } finally {
+    consumer.close();
+  }
+  const reopened = new Store(root);
+  const next = new Consumer(reopened);
+  try {
+    assert.deepEqual(next.poll(0), []);
+    assert.ok(reopened.submission(message.id));
+    reopened.retry(message.id);
+    assert.equal(reopened.submission(message.id), null);
+    assert.equal(reopened.deliveryBlock(message.id), null);
+    assert.deepEqual(next.poll(0), [reopened.message(message.id)]);
+  } finally {
+    next.close();
+    reopened.close();
+  }
 });

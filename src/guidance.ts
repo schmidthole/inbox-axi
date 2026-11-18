@@ -58,9 +58,10 @@ const DETAILS: Record<string, string> = {
   ack: "requires MESSAGE_ID; mark durable incorporation; repeated acknowledgment succeeds",
   "ack-status":
     "requires 1..8 MESSAGE_ID values; inspect acknowledgment without changing it",
-  "delivery-state": "requires MESSAGE_ID; inspect durable uncertainty block",
+  "delivery-state":
+    "requires MESSAGE_ID; inspect a durable uncertainty block or confirmed submission",
   retry:
-    "requires MESSAGE_ID; explicitly clear durable uncertainty and authorize retry",
+    "requires MESSAGE_ID; clear a durable uncertainty block or confirmed submission and authorize another delivery",
   consume:
     "exclusive json-lines delivery; --parent-pipe stops on stdin eof and emits ready event; never auto-acknowledges",
   codex:

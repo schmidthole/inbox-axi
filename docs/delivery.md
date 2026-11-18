@@ -25,27 +25,31 @@ then server sequence, so continuing new traffic cannot starve them. The emitted
 batch is ordered by server sequence. Old unacknowledged input no longer blocks
 message nine or subsequent operator steering.
 
-Per-message redelivery waits 30, 60, 120, 240, then at most 300 seconds. Scheduling
-metadata lives in a connection-private, file-backed SQLite temporary table, with
-one small record per offered pending message, not a growing in-memory batch or
-native queue. Acked records are excluded and removed on the next poll. Only bounded
-query pages/batches are loaded into JavaScript memory. The table disappears on consumer
-shutdown/crash; restart can immediately redeliver stable message IDs in FIFO order.
-Durable uncertainty blocks are excluded from both new offers and due retries by
-this shared consumer, including manual consume and Pi/Claude after switching from
-Codex. Blocked messages stay pending; they do not occupy batch slots or prevent
-unrelated input (including stop instructions) from being offered. Explicit `retry`
-removes the block, making the message eligible under the current retry schedule;
-restarting the consumer resets that schedule. Explicit `ack` removes the message
-from pending delivery. Neither recovery action is automatic.
-Deduplicate IDs in working context. There is no exactly-once claim, fixed delivery
-latency under unlimited incoming traffic, or real-time scheduling guarantee.
+Per-message redelivery waits 30, 60, 120, 240, then at most 300 seconds for
+messages that are still unacknowledged, not uncertainty-blocked, and not recorded
+as a confirmed submission. Scheduling metadata lives in a connection-private,
+file-backed SQLite temporary table, with one small record per offered pending
+message, not a growing in-memory batch or native queue. Acked records are excluded
+and removed on the next poll. Only bounded query pages/batches are loaded into
+JavaScript memory. The table disappears on consumer shutdown/crash; restart can
+immediately redeliver stable message IDs that have neither an uncertainty block
+nor a confirmed submission. Durable uncertainty blocks and confirmed submissions
+are excluded from both new offers and due retries by this shared consumer,
+including manual consume and Pi/Claude after switching from Codex. Excluded
+messages stay pending; they do not occupy batch slots or prevent unrelated input
+(including stop instructions) from being offered. Explicit `retry` removes the
+block and any confirmed submission, making the message eligible again; restarting
+the consumer resets the backoff schedule. Explicit `ack` removes the message from
+pending delivery. Neither recovery action is automatic. Deduplicate IDs in working
+context. There is no exactly-once claim, fixed delivery latency under unlimited
+incoming traffic, or real-time scheduling guarantee.
 
 Pipe/API write success, observed native receipt, incorporation ack, reply, and
 completion are distinct facts. This version retains mailbox pending state until
 explicit `ack`. It does not infer model receipt from write success or auto-forward
-transcripts. A process crash after submission can duplicate delivery. Ack only
-after persisting enough working context to survive your own session reset.
+transcripts. A crash before a durable Codex outcome can offer the message again.
+A confirmed submission is not offered again after restart. Ack only after
+persisting enough working context to survive your own session reset.
 
 ## Native boundaries
 
@@ -126,7 +130,7 @@ mailbox bindings: its physical home and explicit `read_thread_argv`, `ack_argv`
 and `reply_argv`. These argv arrays select the adapter's Node executable and
 installed compiled `dist/cli.js` with `--home` and `--json`; the existing native TUI
 does not need inherited `INBOX_AXI_HOME` or an `inbox-axi` executable on `PATH`.
-Keep that npm installation available while the native context uses its argv.
+Keep this installation available while the native context uses its argv.
 Execute the arrays directly, without a shell. Before acting, replying or acking,
 read the thread, repeat with `--after NEXT_CURSOR` until `next_cursor` is null,
 and restore any generic associated task context from the returned metadata.
@@ -134,13 +138,32 @@ The reply argv uses the exact thread and parent IDs and reads explicit reply tex
 from stdin. Replies never ack or automatically forward assistant transcripts.
 
 Before a Codex mutating RPC, a durable delivery block is stored. A well-formed
-JSON-RPC rejection (integer code, string message, no simultaneous result) clears it;
-arbitrary native error messages/data are replaced with sanitized inbox-facing diagnostics.
-Malformed error envelopes retain uncertainty. A matching successful response clears it but does
-**not** ack. Timeout, disconnect, malformed response or crash leaves uncertainty
-blocked across restarts and consumer/adapter changes. `status` counts blocked pending items. Inspect
-`delivery-state MESSAGE_ID`; reconcile in the native UI, then either explicitly
-`ack MESSAGE_ID` if incorporated, or `retry MESSAGE_ID` to authorize resubmission
-and relaunch the adapter. Retry can duplicate an already-applied request; it is
-not evidence that the first submission failed. Stable IDs aid deduplication but
-are not a promise of native exactly-once semantics.
+JSON-RPC rejection (integer code, string message, no simultaneous result) clears
+that block and does not record a submission, so the shared consumer can offer the
+message again on its backoff schedule. There is still no immediate queue fallback
+in the same call. Arbitrary native error messages/data are replaced with sanitized
+inbox-facing diagnostics. Malformed error envelopes retain uncertainty. A matching
+successful response records a durable submission, clears the in-progress block, and
+does **not** ack. That message stays pending and is not offered again, including
+after restart, until explicit `ack` or `retry`. Timeout, disconnect, a malformed
+response, or a crash after the pre-call block and before a confirmed result leaves
+the uncertainty block in place and does not record a submission. Those messages
+are not automatically resubmitted. `status` counts blocked pending items, not
+confirmed submissions. Inspect `delivery-state MESSAGE_ID` for the block or the
+submission. Reconcile an uncertain block in the native UI, then either explicitly
+`ack MESSAGE_ID` if incorporated, or `retry MESSAGE_ID` to clear the block and
+authorize another submission. `retry` also clears a confirmed submission and can
+therefore duplicate an already-applied request; it is not evidence that the first
+submission failed. Stable IDs aid deduplication but are not a promise of native
+exactly-once semantics.
+
+A crash before any durable block or submission loses only the connection-private
+offer schedule, so restart offers that message again. That preserves at-least-once
+delivery for attempts that never reached a Codex outcome. Reply never acknowledges,
+and nothing in this path auto-acks.
+
+Pi and Claude do not record a submission. Pi's user-message call and Claude's
+channel notification can be dropped or remain unobserved; a successful write is
+not receipt. They keep the shared consumer's backoff redelivery of unacked
+messages until explicit ack. Codex uses the same consumer, but a confirmed RPC
+result is a durable submission rather than another uncertain offer.
