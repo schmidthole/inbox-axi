@@ -80,7 +80,8 @@ test(
         "npm",
         [
           "install",
-          "--offline",
+          // npm ci does not store registry packuments, so --offline fails on a cold cache.
+          "--prefer-offline",
           "--no-audit",
           "--no-fund",
           "--prefix",
