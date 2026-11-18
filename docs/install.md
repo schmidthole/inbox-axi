@@ -10,7 +10,7 @@ Git URL install, from any directory:
 npm install -g git+https://github.com/schmidthole/inbox-axi.git
 ```
 
-That runs `prepack`, which builds `dist` and checks the generated skill before the package is installed.
+That runs `prepare`, which builds `dist` and checks the generated skill before the package is installed. A packed registry-style tarball does not run the build again.
 
 Checkout install:
 
